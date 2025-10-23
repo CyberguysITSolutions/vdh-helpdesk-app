@@ -2,19 +2,13 @@ import streamlit as st
 import pandas as pd
 from datetime import datetime
 import os
-
-# Try to import database drivers
-try:
-    import pymssql
-    USE_PYMSSQL = True
-except ImportError:
-    import pyodbc
-    USE_PYMSSQL = False
+from sqlalchemy import create_engine, text
+from urllib.parse import quote_plus
 
 # Page configuration
 st.set_page_config(page_title="IT Help Desk", page_icon="🎫", layout="wide")
 
-# Database connection
+# Database connection using SQLAlchemy
 def get_db_connection():
     # Try to get credentials from Streamlit secrets first, then environment variables
     try:
@@ -29,50 +23,30 @@ def get_db_connection():
         username = os.getenv("DB_USERNAME")
         password = os.getenv("DB_PASSWORD")
     
-    # Use pymssql (works in Streamlit Cloud)
-    if USE_PYMSSQL:
-        try:
-            # Azure SQL requires specific connection parameters
-            conn = pymssql.connect(
-                server=server,
-                user=username,
-                password=password,
-                database=database,
-                port=1433,
-                timeout=30,
-                login_timeout=30,
-                charset='UTF-8',
-                as_dict=False
-            )
-            return conn
-        except Exception as e:
-            raise Exception(f"Database connection failed with pymssql: {str(e)}")
+    # URL encode the password to handle special characters
+    password_encoded = quote_plus(password)
     
-    # Fallback to pyodbc (for local development)
-    else:
-        drivers = [
-            '{ODBC Driver 17 for SQL Server}',
-            '{ODBC Driver 18 for SQL Server}',
-        ]
-        
-        last_error = None
-        for driver in drivers:
-            try:
-                connection_string = f'DRIVER={driver};SERVER={server};DATABASE={database};UID={username};PWD={password};Encrypt=yes;TrustServerCertificate=yes;Connection Timeout=30;'
-                conn = pyodbc.connect(connection_string)
-                return conn
-            except Exception as e:
-                last_error = e
-                continue
-        
-        raise Exception(f"Database connection failed. Last error: {last_error}")
+    # Create connection string for Azure SQL using pymssql driver
+    connection_string = f"mssql+pymssql://{username}:{password_encoded}@{server}:1433/{database}?charset=utf8"
+    
+    try:
+        # Create engine
+        engine = create_engine(
+            connection_string,
+            connect_args={
+                "timeout": 30,
+                "login_timeout": 30
+            }
+        )
+        return engine
+    except Exception as e:
+        raise Exception(f"Database connection failed: {str(e)}")
 
 # Execute query function
 def execute_query(query):
     try:
-        conn = get_db_connection()
-        df = pd.read_sql_query(query, conn)
-        conn.close()
+        engine = get_db_connection()
+        df = pd.read_sql_query(query, engine)
         return df, None
     except Exception as e:
         return None, str(e)
@@ -90,27 +64,30 @@ if page == "Dashboard":
     col1, col2, col3, col4 = st.columns(4)
     
     # Get statistics
-    conn = get_db_connection()
-    cursor = conn.cursor()
+    engine = get_db_connection()
     
     with col1:
-        cursor.execute("SELECT COUNT(*) FROM dbo.Tickets WHERE status = 'open'")
-        open_tickets = cursor.fetchone()[0]
+        with engine.connect() as conn:
+            result = conn.execute(text("SELECT COUNT(*) FROM dbo.Tickets WHERE status = 'open'"))
+            open_tickets = result.scalar()
         st.metric("Open Tickets", open_tickets)
     
     with col2:
-        cursor.execute("SELECT COUNT(*) FROM dbo.Tickets WHERE status = 'in_progress'")
-        in_progress = cursor.fetchone()[0]
+        with engine.connect() as conn:
+            result = conn.execute(text("SELECT COUNT(*) FROM dbo.Tickets WHERE status = 'in_progress'"))
+            in_progress = result.scalar()
         st.metric("In Progress", in_progress)
     
     with col3:
-        cursor.execute("SELECT COUNT(*) FROM dbo.Tickets WHERE priority = 'urgent'")
-        urgent = cursor.fetchone()[0]
+        with engine.connect() as conn:
+            result = conn.execute(text("SELECT COUNT(*) FROM dbo.Tickets WHERE priority = 'urgent'"))
+            urgent = result.scalar()
         st.metric("Urgent", urgent, delta_color="inverse")
     
     with col4:
-        cursor.execute("SELECT COUNT(*) FROM dbo.Tickets")
-        total = cursor.fetchone()[0]
+        with engine.connect() as conn:
+            result = conn.execute(text("SELECT COUNT(*) FROM dbo.Tickets"))
+            total = result.scalar()
         st.metric("Total Tickets", total)
     
     st.markdown("### Recent Tickets")
@@ -131,8 +108,6 @@ if page == "Dashboard":
         st.error(f"Error: {error}")
     else:
         st.dataframe(df, use_container_width=True)
-    
-    conn.close()
 
 elif page == "Tickets":
     st.header("🎫 All Tickets")
@@ -338,7 +313,7 @@ elif page == "Connection Test":
             st.write(f"**Database:** {database}")
         with col2:
             st.write(f"**Username:** {username}")
-            st.write(f"**Driver:** {'pymssql' if USE_PYMSSQL else 'pyodbc'}")
+            st.write(f"**Driver:** SQLAlchemy + pymssql")
     except Exception as e:
         st.error(f"Could not read secrets: {e}")
         st.info("Make sure you've configured secrets in Streamlit Cloud settings")
@@ -349,25 +324,25 @@ elif page == "Connection Test":
     if st.button("Test Connection"):
         with st.spinner("Testing connection..."):
             try:
-                conn = get_db_connection()
+                engine = get_db_connection()
                 st.success("✅ Connection successful!")
                 
                 # Try a simple query
-                cursor = conn.cursor()
-                cursor.execute("SELECT @@VERSION")
-                version = cursor.fetchone()[0]
-                st.info(f"Database version: {version[:100]}...")
+                with engine.connect() as conn:
+                    result = conn.execute(text("SELECT @@VERSION"))
+                    version = result.scalar()
+                    st.info(f"Database version: {version[:100]}...")
                 
                 # Test table access
-                cursor.execute("SELECT COUNT(*) FROM dbo.Tickets")
-                count = cursor.fetchone()[0]
-                st.success(f"✅ Can access Tickets table: {count} tickets found")
+                with engine.connect() as conn:
+                    result = conn.execute(text("SELECT COUNT(*) FROM dbo.Tickets"))
+                    count = result.scalar()
+                    st.success(f"✅ Can access Tickets table: {count} tickets found")
                 
-                cursor.execute("SELECT COUNT(*) FROM dbo.users")
-                count = cursor.fetchone()[0]
-                st.success(f"✅ Can access users table: {count} users found")
-                
-                conn.close()
+                with engine.connect() as conn:
+                    result = conn.execute(text("SELECT COUNT(*) FROM dbo.users"))
+                    count = result.scalar()
+                    st.success(f"✅ Can access users table: {count} users found")
                 
             except Exception as e:
                 st.error(f"❌ Connection failed: {str(e)}")
@@ -383,7 +358,7 @@ elif page == "Connection Test":
                 2. **Verify credentials:**
                    - Check Streamlit secrets are correct
                    - Username should NOT include @servername
-                   - Password should be URL-encoded if it has special characters
+                   - Password should be correct
                 
                 3. **Check server name:**
                    - Should be: `servername.database.windows.net`
@@ -402,18 +377,17 @@ elif page == "Connection Test":
     st.write(f"**Streamlit version:** {st.__version__}")
     st.write(f"**Pandas version:** {pd.__version__}")
     
-    if USE_PYMSSQL:
-        st.write(f"**pymssql version:** {pymssql.__version__}")
-    else:
-        st.write(f"**pyodbc version:** {pyodbc.version}")
+    try:
+        import sqlalchemy
+        st.write(f"**SQLAlchemy version:** {sqlalchemy.__version__}")
+    except:
+        st.write("**SQLAlchemy:** Not installed")
     
-    # Show available drivers for pyodbc
-    if not USE_PYMSSQL:
-        try:
-            drivers = pyodbc.drivers()
-            st.write(f"**Available ODBC Drivers:** {', '.join(drivers) if drivers else 'None found'}")
-        except:
-            st.write("**Available ODBC Drivers:** Could not list drivers")
+    try:
+        import pymssql
+        st.write(f"**pymssql version:** {pymssql.__version__}")
+    except:
+        st.write("**pymssql:** Not installed")
 
 # Footer
 st.markdown("---")
