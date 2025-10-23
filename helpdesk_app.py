@@ -1,8 +1,15 @@
 import streamlit as st
 import pandas as pd
 from datetime import datetime
-import pyodbc
 import os
+
+# Try to import database drivers
+try:
+    import pymssql
+    USE_PYMSSQL = True
+except ImportError:
+    import pyodbc
+    USE_PYMSSQL = False
 
 # Page configuration
 st.set_page_config(page_title="IT Help Desk", page_icon="🎫", layout="wide")
@@ -22,42 +29,39 @@ def get_db_connection():
         username = os.getenv("DB_USERNAME")
         password = os.getenv("DB_PASSWORD")
     
-    # Try multiple driver options (Streamlit Cloud has limited drivers)
-    drivers = [
-        '{ODBC Driver 17 for SQL Server}',
-        '{ODBC Driver 18 for SQL Server}',
-        '{FreeTDS}',
-        'ODBC Driver 17 for SQL Server',
-        'ODBC Driver 18 for SQL Server'
-    ]
-    
-    # Try each driver until one works
-    last_error = None
-    for driver in drivers:
+    # Use pymssql (works in Streamlit Cloud)
+    if USE_PYMSSQL:
         try:
-            connection_string = f'DRIVER={driver};SERVER={server};DATABASE={database};UID={username};PWD={password};Encrypt=yes;TrustServerCertificate=no;Connection Timeout=30;'
-            conn = pyodbc.connect(connection_string)
+            conn = pymssql.connect(
+                server=server,
+                database=database,
+                user=username,
+                password=password,
+                tds_version='7.4',
+                port=1433
+            )
             return conn
         except Exception as e:
-            last_error = e
-            continue
+            raise Exception(f"Database connection failed with pymssql: {str(e)}")
     
-    # If no driver worked, try pymssql as fallback
-    try:
-        import pymssql
-        conn = pymssql.connect(
-            server=server,
-            database=database,
-            user=username,
-            password=password,
-            tds_version='7.4'
-        )
-        return conn
-    except:
-        pass
-    
-    # If still failing, raise the error
-    raise Exception(f"Could not connect to database. Last error: {last_error}")
+    # Fallback to pyodbc (for local development)
+    else:
+        drivers = [
+            '{ODBC Driver 17 for SQL Server}',
+            '{ODBC Driver 18 for SQL Server}',
+        ]
+        
+        last_error = None
+        for driver in drivers:
+            try:
+                connection_string = f'DRIVER={driver};SERVER={server};DATABASE={database};UID={username};PWD={password};Encrypt=yes;TrustServerCertificate=yes;Connection Timeout=30;'
+                conn = pyodbc.connect(connection_string)
+                return conn
+            except Exception as e:
+                last_error = e
+                continue
+        
+        raise Exception(f"Database connection failed. Last error: {last_error}")
 
 # Execute query function
 def execute_query(query):
@@ -74,7 +78,7 @@ st.title("🎫 IT Help Desk System")
 st.markdown("---")
 
 # Sidebar for navigation
-page = st.sidebar.selectbox("Navigate", ["Dashboard", "Tickets", "Users", "Query Builder"])
+page = st.sidebar.selectbox("Navigate", ["Dashboard", "Tickets", "Users", "Query Builder", "Connection Test"])
 
 if page == "Dashboard":
     st.header("📊 Dashboard")
@@ -309,6 +313,103 @@ ORDER BY username"""
                 )
         else:
             st.warning("Please enter a query")
+
+elif page == "Connection Test":
+    st.header("🔌 Database Connection Test")
+    
+    st.markdown("""
+    This page helps diagnose connection issues with your Azure SQL Database.
+    """)
+    
+    # Show connection info (without password)
+    st.subheader("Configuration")
+    try:
+        server = st.secrets["database"]["server"]
+        database = st.secrets["database"]["database"]
+        username = st.secrets["database"]["username"]
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            st.write(f"**Server:** {server}")
+            st.write(f"**Database:** {database}")
+        with col2:
+            st.write(f"**Username:** {username}")
+            st.write(f"**Driver:** {'pymssql' if USE_PYMSSQL else 'pyodbc'}")
+    except Exception as e:
+        st.error(f"Could not read secrets: {e}")
+        st.info("Make sure you've configured secrets in Streamlit Cloud settings")
+    
+    st.markdown("---")
+    
+    # Test connection
+    if st.button("Test Connection"):
+        with st.spinner("Testing connection..."):
+            try:
+                conn = get_db_connection()
+                st.success("✅ Connection successful!")
+                
+                # Try a simple query
+                cursor = conn.cursor()
+                cursor.execute("SELECT @@VERSION")
+                version = cursor.fetchone()[0]
+                st.info(f"Database version: {version[:100]}...")
+                
+                # Test table access
+                cursor.execute("SELECT COUNT(*) FROM dbo.Tickets")
+                count = cursor.fetchone()[0]
+                st.success(f"✅ Can access Tickets table: {count} tickets found")
+                
+                cursor.execute("SELECT COUNT(*) FROM dbo.users")
+                count = cursor.fetchone()[0]
+                st.success(f"✅ Can access users table: {count} users found")
+                
+                conn.close()
+                
+            except Exception as e:
+                st.error(f"❌ Connection failed: {str(e)}")
+                
+                # Provide troubleshooting tips
+                st.markdown("### 🔧 Troubleshooting Tips:")
+                st.markdown("""
+                1. **Check Azure SQL Firewall:**
+                   - Go to Azure Portal → SQL Server → Networking
+                   - Add firewall rule to allow Streamlit Cloud IPs
+                   - Or temporarily allow all IPs (0.0.0.0 - 255.255.255.255)
+                
+                2. **Verify credentials:**
+                   - Check Streamlit secrets are correct
+                   - Username should NOT include @servername
+                   - Password should be URL-encoded if it has special characters
+                
+                3. **Check server name:**
+                   - Should be: `servername.database.windows.net`
+                   - Should NOT include port or database name
+                
+                4. **Try SQL Authentication:**
+                   - Make sure you're using SQL Authentication, not Azure AD
+                """)
+    
+    # Show environment info
+    st.markdown("---")
+    st.subheader("Environment Info")
+    
+    import sys
+    st.write(f"**Python version:** {sys.version}")
+    st.write(f"**Streamlit version:** {st.__version__}")
+    st.write(f"**Pandas version:** {pd.__version__}")
+    
+    if USE_PYMSSQL:
+        st.write(f"**pymssql version:** {pymssql.__version__}")
+    else:
+        st.write(f"**pyodbc version:** {pyodbc.version}")
+    
+    # Show available drivers for pyodbc
+    if not USE_PYMSSQL:
+        try:
+            drivers = pyodbc.drivers()
+            st.write(f"**Available ODBC Drivers:** {', '.join(drivers) if drivers else 'None found'}")
+        except:
+            st.write("**Available ODBC Drivers:** Could not list drivers")
 
 # Footer
 st.markdown("---")
