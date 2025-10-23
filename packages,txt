@@ -1,0 +1,40 @@
+freetds-dev
+freetds-bin
+unixodbc
+unixodbc-dev
+```
+5. Commit: "Add FreeTDS drivers"
+
+### Update helpdesk_app.py:
+1. Edit and replace with new version (better error messages)
+2. Commit
+
+---
+
+## 🔧 What packages.txt Does:
+
+Streamlit Cloud will install these system packages:
+- **freetds-dev** - FreeTDS library for SQL Server
+- **freetds-bin** - FreeTDS binaries
+- **unixodbc** - ODBC driver manager
+- **unixodbc-dev** - ODBC development files
+
+These provide the ODBC drivers needed to connect to Azure SQL!
+
+---
+
+## ⏳ After Upload:
+
+1. Streamlit Cloud will **rebuild** the app (takes 2-3 minutes)
+2. It will install the system packages
+3. FreeTDS driver will be available
+4. Connection should work! 🎉
+
+---
+
+## 📁 Your GitHub Repo Should Have:
+```
+your-repo/
+├── helpdesk_app.py
+├── requirements.txt
+└── packages.txt    ← NEW FILE!
