@@ -32,13 +32,17 @@ def get_db_connection():
     # Use pymssql (works in Streamlit Cloud)
     if USE_PYMSSQL:
         try:
+            # Azure SQL requires specific connection parameters
             conn = pymssql.connect(
                 server=server,
-                database=database,
                 user=username,
                 password=password,
-                tds_version='7.4',
-                port=1433
+                database=database,
+                port=1433,
+                timeout=30,
+                login_timeout=30,
+                charset='UTF-8',
+                as_dict=False
             )
             return conn
         except Exception as e:
