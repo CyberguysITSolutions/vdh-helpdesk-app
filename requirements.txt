@@ -6,3 +6,7 @@ openpyxl==3.1.2
 reportlab==4.0.7
 
 # trigger 
+pandas>=2.0.0
+pyodbc>=4.0.39
+openpyxl==3.1.2
+reportlab==4.0.7
