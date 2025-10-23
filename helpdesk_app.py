@@ -2,23 +2,62 @@ import streamlit as st
 import pandas as pd
 from datetime import datetime
 import pyodbc
+import os
 
 # Page configuration
 st.set_page_config(page_title="IT Help Desk", page_icon="🎫", layout="wide")
 
 # Database connection
 def get_db_connection():
-    # Azure SQL connection string
-    # You'll need to fill in your actual credentials
-    server = 'sql-helpdesk-server-1758757113.database.windows.net'
-    database = 'helpdesk-db'
-    username = st.secrets.get("db_username", "helpdeskadmin")
-    password = st.secrets.get("db_password", "YourSecureP@ssw0rd123!")
-    driver = '{ODBC Driver 18 for SQL Server}'
+    # Try to get credentials from Streamlit secrets first, then environment variables
+    try:
+        server = st.secrets["database"]["server"]
+        database = st.secrets["database"]["database"]
+        username = st.secrets["database"]["username"]
+        password = st.secrets["database"]["password"]
+    except:
+        # Fallback to environment variables
+        server = os.getenv("DB_SERVER", "sql-helpdesk-server-1758757113.database.windows.net")
+        database = os.getenv("DB_DATABASE", "helpdesk-db")
+        username = os.getenv("DB_USERNAME")
+        password = os.getenv("DB_PASSWORD")
     
-    connection_string = f'DRIVER={driver};SERVER={server};DATABASE={database};UID={username};PWD={password}'
-    conn = pyodbc.connect(connection_string)
-    return conn
+    # Try multiple driver options (Streamlit Cloud has limited drivers)
+    drivers = [
+        '{ODBC Driver 17 for SQL Server}',
+        '{ODBC Driver 18 for SQL Server}',
+        '{FreeTDS}',
+        'ODBC Driver 17 for SQL Server',
+        'ODBC Driver 18 for SQL Server'
+    ]
+    
+    # Try each driver until one works
+    last_error = None
+    for driver in drivers:
+        try:
+            connection_string = f'DRIVER={driver};SERVER={server};DATABASE={database};UID={username};PWD={password};Encrypt=yes;TrustServerCertificate=no;Connection Timeout=30;'
+            conn = pyodbc.connect(connection_string)
+            return conn
+        except Exception as e:
+            last_error = e
+            continue
+    
+    # If no driver worked, try pymssql as fallback
+    try:
+        import pymssql
+        conn = pymssql.connect(
+            server=server,
+            database=database,
+            user=username,
+            password=password,
+            tds_version='7.4'
+        )
+        return conn
+    except:
+        pass
+    
+    # If still failing, raise the error
+    raise Exception(f"Could not connect to database. Last error: {last_error}")
 
 # Execute query function
 def execute_query(query):
