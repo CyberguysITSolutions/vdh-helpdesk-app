@@ -12,8 +12,8 @@ def get_db_connection():
     # You'll need to fill in your actual credentials
     server = 'sql-helpdesk-server-1758757113.database.windows.net'
     database = 'helpdesk-db'
-    username = st.secrets.get("db_username", "your_username")
-    password = st.secrets.get("db_password", "your_password")
+    username = st.secrets.get("db_username", "helpdeskadmin")
+    password = st.secrets.get("db_password", "YourSecureP@ssw0rd123!")
     driver = '{ODBC Driver 18 for SQL Server}'
     
     connection_string = f'DRIVER={driver};SERVER={server};DATABASE={database};UID={username};PWD={password}'
