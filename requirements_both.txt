@@ -1,0 +1,18 @@
+# === For Streamlit Helpdesk App ===
+streamlit>=1.28.0
+pandas>=2.0.0
+
+# === For Flask Application (if you have one) ===
+Flask==2.3.0
+gunicorn==21.2.0
+Werkzeug==2.3.0
+
+# === Shared Dependencies ===
+# Database
+pyodbc>=4.0.39
+
+# Excel Support
+openpyxl==3.1.2
+
+# PDF Support
+reportlab==4.0.7
