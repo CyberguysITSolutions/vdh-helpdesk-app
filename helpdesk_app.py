@@ -778,6 +778,362 @@ elif page == "🛒 Procurement":
                         st.info(f"⏳ Pending: {proc['level2_approver'] if proc['level2_approver'] else 'Not assigned'}")
                     else:
                         st.warning("⏸️ Awaiting Level 1")
+                
+                st.markdown("---")
+                
+                # ========== PHASE 2: ACTION BUTTONS ==========
+                st.subheader("⚡ Actions")
+                
+                # Initialize action states
+                if 'show_edit_procurement' not in st.session_state:
+                    st.session_state.show_edit_procurement = False
+                if 'show_add_items' not in st.session_state:
+                    st.session_state.show_add_items = False
+                if 'show_add_note' not in st.session_state:
+                    st.session_state.show_add_note = False
+                
+                action_col1, action_col2, action_col3, action_col4, action_col5 = st.columns(5)
+                
+                # Submit for Approval (Draft only)
+                if proc['status'] == 'draft':
+                    with action_col1:
+                        if st.button("📤 Submit for Approval"):
+                            # Assign to first Level 1 approver
+                            get_approver = "SELECT TOP 1 approver_id FROM dbo.Procurement_Approvers WHERE approval_level = 1 AND is_active = 1"
+                            approver_df, _ = execute_query(get_approver)
+                            if approver_df is not None and len(approver_df) > 0:
+                                approver_id = approver_df.iloc[0]['approver_id']
+                                update_query = """
+                                    UPDATE dbo.Procurement_Requests 
+                                    SET status = 'pending_level1', level1_approver_id = ?, updated_at = GETDATE()
+                                    WHERE request_id = ?
+                                """
+                                success, error = execute_non_query(update_query, (approver_id, st.session_state.view_procurement_id))
+                                if success:
+                                    st.success("✅ Submitted for Level 1 approval!")
+                                    st.rerun()
+                                else:
+                                    st.error(f"Error: {error}")
+                
+                # Edit Request (Draft or Rejected only)
+                if proc['status'] in ['draft', 'rejected']:
+                    with action_col2:
+                        if st.button("✏️ Edit Request"):
+                            st.session_state.show_edit_procurement = not st.session_state.show_edit_procurement
+                            st.rerun()
+                
+                # Approve (Pending Level 1 or 2)
+                if proc['status'] == 'pending_level1':
+                    with action_col3:
+                        if st.button("✅ Approve (L1)"):
+                            # Assign to first Level 2 approver
+                            get_approver = "SELECT TOP 1 approver_id FROM dbo.Procurement_Approvers WHERE approval_level = 2 AND is_active = 1"
+                            approver_df, _ = execute_query(get_approver)
+                            if approver_df is not None and len(approver_df) > 0:
+                                approver_id = approver_df.iloc[0]['approver_id']
+                                update_query = """
+                                    UPDATE dbo.Procurement_Requests 
+                                    SET status = 'pending_level2', 
+                                        level1_approved_at = GETDATE(),
+                                        level2_approver_id = ?,
+                                        updated_at = GETDATE()
+                                    WHERE request_id = ?
+                                """
+                                success, error = execute_non_query(update_query, (approver_id, st.session_state.view_procurement_id))
+                                if success:
+                                    # Add note
+                                    note_query = "INSERT INTO dbo.Procurement_Notes (request_id, note_text, note_type, created_by) VALUES (?, 'Level 1 approved', 'approval', 'Admin')"
+                                    execute_non_query(note_query, (st.session_state.view_procurement_id,))
+                                    st.success("✅ Level 1 Approved! Moving to Level 2...")
+                                    st.rerun()
+                    
+                    with action_col4:
+                        if st.button("❌ Reject (L1)"):
+                            update_query = """
+                                UPDATE dbo.Procurement_Requests 
+                                SET status = 'rejected', updated_at = GETDATE()
+                                WHERE request_id = ?
+                            """
+                            success, error = execute_non_query(update_query, (st.session_state.view_procurement_id,))
+                            if success:
+                                note_query = "INSERT INTO dbo.Procurement_Notes (request_id, note_text, note_type, created_by) VALUES (?, 'Level 1 rejected', 'rejection', 'Admin')"
+                                execute_non_query(note_query, (st.session_state.view_procurement_id,))
+                                st.warning("❌ Request Rejected")
+                                st.rerun()
+                
+                elif proc['status'] == 'pending_level2':
+                    with action_col3:
+                        if st.button("✅ Final Approve (L2)"):
+                            update_query = """
+                                UPDATE dbo.Procurement_Requests 
+                                SET status = 'approved', 
+                                    level2_approved_at = GETDATE(),
+                                    updated_at = GETDATE()
+                                WHERE request_id = ?
+                            """
+                            success, error = execute_non_query(update_query, (st.session_state.view_procurement_id,))
+                            if success:
+                                note_query = "INSERT INTO dbo.Procurement_Notes (request_id, note_text, note_type, created_by) VALUES (?, 'Level 2 approved - Final approval complete', 'approval', 'Admin')"
+                                execute_non_query(note_query, (st.session_state.view_procurement_id,))
+                                st.success("✅ Request Fully Approved!")
+                                st.rerun()
+                    
+                    with action_col4:
+                        if st.button("❌ Reject (L2)"):
+                            update_query = """
+                                UPDATE dbo.Procurement_Requests 
+                                SET status = 'rejected', updated_at = GETDATE()
+                                WHERE request_id = ?
+                            """
+                            success, error = execute_non_query(update_query, (st.session_state.view_procurement_id,))
+                            if success:
+                                note_query = "INSERT INTO dbo.Procurement_Notes (request_id, note_text, note_type, created_by) VALUES (?, 'Level 2 rejected', 'rejection', 'Admin')"
+                                execute_non_query(note_query, (st.session_state.view_procurement_id,))
+                                st.warning("❌ Request Rejected")
+                                st.rerun()
+                
+                # Status Changes (Approved status only)
+                if proc['status'] == 'approved':
+                    with action_col3:
+                        if st.button("📦 Mark as Ordered"):
+                            update_query = "UPDATE dbo.Procurement_Requests SET status = 'ordered', updated_at = GETDATE() WHERE request_id = ?"
+                            success, _ = execute_non_query(update_query, (st.session_state.view_procurement_id,))
+                            if success:
+                                note_query = "INSERT INTO dbo.Procurement_Notes (request_id, note_text, note_type, created_by) VALUES (?, 'Order placed with vendor', 'status_change', 'Admin')"
+                                execute_non_query(note_query, (st.session_state.view_procurement_id,))
+                                st.success("📦 Marked as Ordered")
+                                st.rerun()
+                
+                if proc['status'] == 'ordered':
+                    with action_col3:
+                        if st.button("✅ Mark as Received"):
+                            update_query = "UPDATE dbo.Procurement_Requests SET status = 'received', updated_at = GETDATE() WHERE request_id = ?"
+                            success, _ = execute_non_query(update_query, (st.session_state.view_procurement_id,))
+                            if success:
+                                note_query = "INSERT INTO dbo.Procurement_Notes (request_id, note_text, note_type, created_by) VALUES (?, 'Order received and verified', 'status_change', 'Admin')"
+                                execute_non_query(note_query, (st.session_state.view_procurement_id,))
+                                st.success("✅ Marked as Received")
+                                st.rerun()
+                
+                # Add Line Items (Draft only)
+                if proc['status'] == 'draft':
+                    with action_col5:
+                        if st.button("➕ Add Items"):
+                            st.session_state.show_add_items = not st.session_state.show_add_items
+                            st.rerun()
+                
+                # Add Note (Always available)
+                with action_col5 if proc['status'] != 'draft' else action_col4:
+                    if st.button("💬 Add Note"):
+                        st.session_state.show_add_note = not st.session_state.show_add_note
+                        st.rerun()
+                
+                st.markdown("---")
+                
+                # ========== EDIT REQUEST FORM ==========
+                if st.session_state.show_edit_procurement:
+                    with st.expander("✏️ Edit Request", expanded=True):
+                        with st.form("edit_procurement_form"):
+                            st.markdown("### Request Information")
+                            col1, col2, col3 = st.columns(3)
+                            
+                            with col1:
+                                edit_name = st.text_input("Requester Name*", value=proc['requester_name'])
+                                edit_email = st.text_input("Email*", value=proc['requester_email'])
+                                edit_phone = st.text_input("Phone", value=proc['requester_phone'] if proc['requester_phone'] else "")
+                            
+                            with col2:
+                                locations = ["Crater", "Dinwiddie County", "Greensville/Emporia", "Surry County", "Prince George", "Sussex County", "Hopewell"]
+                                edit_location = st.selectbox("Location*", locations, index=locations.index(proc['location']) if proc['location'] in locations else 0)
+                                edit_department = st.text_input("Department", value=proc['department'] if proc['department'] else "")
+                                priorities = ["low", "normal", "high", "urgent"]
+                                edit_priority = st.selectbox("Priority*", priorities, index=priorities.index(proc['priority']) if proc['priority'] in priorities else 1)
+                            
+                            with col3:
+                                edit_delivery = st.date_input("Delivery Required By", value=proc['delivery_required_by'] if proc['delivery_required_by'] else None)
+                                
+                                cst_query = "SELECT DISTINCT code_value FROM dbo.Procurement_Codes WHERE code_type = 'CST' ORDER BY code_value"
+                                cst_df, _ = execute_query(cst_query)
+                                cst_options = [""] + (cst_df['code_value'].tolist() if cst_df is not None else [])
+                                edit_cst = st.selectbox("CST Code", cst_options, index=cst_options.index(proc['cst_code']) if proc['cst_code'] in cst_options else 0)
+                                
+                                coa_query = "SELECT DISTINCT code_value FROM dbo.Procurement_Codes WHERE code_type = 'COA' ORDER BY code_value"
+                                coa_df, _ = execute_query(coa_query)
+                                coa_options = [""] + (coa_df['code_value'].tolist() if coa_df is not None else [])
+                                edit_coa = st.selectbox("COA Code", coa_options, index=coa_options.index(proc['coa_code']) if proc['coa_code'] in coa_options else 0)
+                            
+                            st.markdown("### Vendor Information")
+                            col1, col2 = st.columns(2)
+                            with col1:
+                                edit_vendor = st.text_input("Vendor Name*", value=proc['vendor_name'])
+                                edit_vendor_contact = st.text_input("Contact Person", value=proc['vendor_contact'] if proc['vendor_contact'] else "")
+                            with col2:
+                                edit_vendor_phone = st.text_input("Vendor Phone", value=proc['vendor_phone'] if proc['vendor_phone'] else "")
+                                edit_vendor_email = st.text_input("Vendor Email", value=proc['vendor_email'] if proc['vendor_email'] else "")
+                            
+                            edit_justification = st.text_area("Justification*", value=proc['justification'], height=100)
+                            
+                            col1, col2 = st.columns([1, 5])
+                            with col1:
+                                save_edit = st.form_submit_button("Save Changes")
+                            with col2:
+                                cancel_edit = st.form_submit_button("Cancel")
+                            
+                            if save_edit:
+                                if edit_name and edit_email and edit_location and edit_vendor and edit_justification:
+                                    update_query = """
+                                        UPDATE dbo.Procurement_Requests 
+                                        SET requester_name=?, requester_email=?, requester_phone=?, location=?, department=?,
+                                            priority=?, delivery_required_by=?, cst_code=?, coa_code=?,
+                                            vendor_name=?, vendor_contact=?, vendor_phone=?, vendor_email=?,
+                                            justification=?, updated_at=GETDATE()
+                                        WHERE request_id=?
+                                    """
+                                    success, error = execute_non_query(update_query, (
+                                        edit_name, edit_email, edit_phone or None, edit_location, edit_department or None,
+                                        edit_priority, edit_delivery, edit_cst or None, edit_coa or None,
+                                        edit_vendor, edit_vendor_contact or None, edit_vendor_phone or None, edit_vendor_email or None,
+                                        edit_justification, st.session_state.view_procurement_id
+                                    ))
+                                    if success:
+                                        st.success("✅ Request updated successfully!")
+                                        st.session_state.show_edit_procurement = False
+                                        st.rerun()
+                                    else:
+                                        st.error(f"Error: {error}")
+                                else:
+                                    st.error("Please fill in all required fields (*)")
+                            
+                            if cancel_edit:
+                                st.session_state.show_edit_procurement = False
+                                st.rerun()
+                
+                # ========== ADD LINE ITEMS FORM ==========
+                if st.session_state.show_add_items:
+                    with st.expander("➕ Add Line Items", expanded=True):
+                        with st.form("add_items_form"):
+                            st.markdown("### New Line Item")
+                            
+                            item_desc = st.text_input("Item Description*")
+                            col1, col2, col3, col4 = st.columns(4)
+                            with col1:
+                                item_qty = st.number_input("Quantity*", min_value=1, value=1)
+                            with col2:
+                                item_price = st.number_input("Unit Price*", min_value=0.01, value=1.00, step=0.01)
+                            with col3:
+                                item_total = item_qty * item_price
+                                st.metric("Total", f"${item_total:,.2f}")
+                            
+                            col1, col2 = st.columns(2)
+                            with col1:
+                                item_manufacturer = st.text_input("Manufacturer")
+                            with col2:
+                                item_model = st.text_input("Model/Part Number")
+                            
+                            item_notes = st.text_area("Notes", height=60)
+                            
+                            col1, col2 = st.columns([1, 5])
+                            with col1:
+                                add_item = st.form_submit_button("Add Item")
+                            with col2:
+                                cancel_item = st.form_submit_button("Cancel")
+                            
+                            if add_item:
+                                if item_desc:
+                                    # Get next line number
+                                    line_query = f"SELECT ISNULL(MAX(line_number), 0) + 1 as next_line FROM dbo.Procurement_Items WHERE request_id = {st.session_state.view_procurement_id}"
+                                    line_df, _ = execute_query(line_query)
+                                    next_line = line_df.iloc[0]['next_line'] if line_df is not None else 1
+                                    
+                                    insert_query = """
+                                        INSERT INTO dbo.Procurement_Items (
+                                            request_id, line_number, item_description, quantity, unit_price,
+                                            manufacturer, model_number, notes
+                                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                                    """
+                                    success, error = execute_non_query(insert_query, (
+                                        st.session_state.view_procurement_id, next_line, item_desc, item_qty, item_price,
+                                        item_manufacturer or None, item_model or None, item_notes or None
+                                    ))
+                                    if success:
+                                        # Update total amount
+                                        update_total = """
+                                            UPDATE dbo.Procurement_Requests 
+                                            SET total_amount = (SELECT SUM(quantity * unit_price) FROM dbo.Procurement_Items WHERE request_id = ?)
+                                            WHERE request_id = ?
+                                        """
+                                        execute_non_query(update_total, (st.session_state.view_procurement_id, st.session_state.view_procurement_id))
+                                        
+                                        st.success("✅ Item added successfully!")
+                                        st.session_state.show_add_items = False
+                                        st.rerun()
+                                    else:
+                                        st.error(f"Error: {error}")
+                                else:
+                                    st.error("Please enter item description")
+                            
+                            if cancel_item:
+                                st.session_state.show_add_items = False
+                                st.rerun()
+                
+                # ========== ADD NOTE FORM ==========
+                if st.session_state.show_add_note:
+                    with st.expander("💬 Add Note", expanded=True):
+                        with st.form("add_note_form"):
+                            note_text = st.text_area("Note/Comment", height=100)
+                            
+                            col1, col2 = st.columns([1, 5])
+                            with col1:
+                                add_note_btn = st.form_submit_button("Add Note")
+                            with col2:
+                                cancel_note = st.form_submit_button("Cancel")
+                            
+                            if add_note_btn:
+                                if note_text:
+                                    insert_note = "INSERT INTO dbo.Procurement_Notes (request_id, note_text, note_type, created_by) VALUES (?, ?, 'comment', 'Admin')"
+                                    success, error = execute_non_query(insert_note, (st.session_state.view_procurement_id, note_text))
+                                    if success:
+                                        st.success("✅ Note added!")
+                                        st.session_state.show_add_note = False
+                                        st.rerun()
+                                    else:
+                                        st.error(f"Error: {error}")
+                                else:
+                                    st.error("Please enter note text")
+                            
+                            if cancel_note:
+                                st.session_state.show_add_note = False
+                                st.rerun()
+                
+                # ========== DISPLAY NOTES/HISTORY ==========
+                st.markdown("---")
+                st.subheader("💬 Notes & History")
+                
+                notes_query = f"""
+                    SELECT note_text, note_type, created_by, created_at 
+                    FROM dbo.Procurement_Notes 
+                    WHERE request_id = {st.session_state.view_procurement_id}
+                    ORDER BY created_at DESC
+                """
+                notes_df, error = execute_query(notes_query)
+                
+                if not error and notes_df is not None and len(notes_df) > 0:
+                    for _, note in notes_df.iterrows():
+                        note_icon = {
+                            'comment': '💬',
+                            'approval': '✅',
+                            'rejection': '❌',
+                            'status_change': '🔄'
+                        }.get(note['note_type'], '📝')
+                        
+                        st.markdown(f"""
+                        <div class="note-card">
+                            {note_icon} <small><strong>{note['created_by']}</strong> - {note['created_at']}</small><br>
+                            {note['note_text']}
+                        </div>
+                        """, unsafe_allow_html=True)
+                else:
+                    st.info("No notes or history yet")
         
         else:
             # List View
