@@ -4,6 +4,8 @@ from datetime import datetime, timedelta
 import os
 import plotly.express as px
 import plotly.graph_objects as go
+from io import BytesIO
+import base64
 
 # Page configuration
 st.set_page_config(page_title="VDH IT Help Desk", page_icon="🎫", layout="wide")
@@ -14,6 +16,25 @@ try:
     HAS_PYODBC = True
 except:
     HAS_PYODBC = False
+
+# Try to import reporting libraries
+try:
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    from openpyxl.utils.dataframe import dataframe_to_rows
+    HAS_EXCEL = True
+except:
+    HAS_EXCEL = False
+
+try:
+    from reportlab.lib.pagesizes import letter, A4
+    from reportlab.lib import colors
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, PageBreak
+    from reportlab.lib.units import inch
+    HAS_PDF = True
+except:
+    HAS_PDF = False
 
 # Database connection
 @st.cache_resource
@@ -75,6 +96,126 @@ def execute_non_query(query, params=None):
     except Exception as e:
         return False, str(e)
 
+def generate_excel_report(df, report_title):
+    """Generate Excel report with formatting"""
+    if not HAS_EXCEL:
+        return None, "openpyxl not installed"
+    
+    try:
+        output = BytesIO()
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "Report"
+        
+        # Add title
+        ws['A1'] = report_title
+        ws['A1'].font = Font(size=16, bold=True)
+        ws['A1'].fill = PatternFill(start_color="002855", end_color="002855", fill_type="solid")
+        ws['A1'].font = Font(size=16, bold=True, color="FFFFFF")
+        ws.merge_cells('A1:' + chr(64 + len(df.columns)) + '1')
+        
+        # Add generation timestamp
+        ws['A2'] = f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+        ws['A2'].font = Font(size=10, italic=True)
+        ws.merge_cells('A2:' + chr(64 + len(df.columns)) + '2')
+        
+        # Add headers
+        header_row = 4
+        for col_num, column_title in enumerate(df.columns, 1):
+            cell = ws.cell(row=header_row, column=col_num)
+            cell.value = column_title
+            cell.font = Font(bold=True, color="FFFFFF")
+            cell.fill = PatternFill(start_color="0066CC", end_color="0066CC", fill_type="solid")
+            cell.alignment = Alignment(horizontal="center", vertical="center")
+        
+        # Add data
+        for row_num, row_data in enumerate(df.values, header_row + 1):
+            for col_num, value in enumerate(row_data, 1):
+                cell = ws.cell(row=row_num, column=col_num)
+                cell.value = value
+                cell.alignment = Alignment(horizontal="left", vertical="center")
+                
+                # Alternate row colors
+                if row_num % 2 == 0:
+                    cell.fill = PatternFill(start_color="F2F2F2", end_color="F2F2F2", fill_type="solid")
+        
+        # Auto-adjust column widths
+        for column in ws.columns:
+            max_length = 0
+            column_letter = column[0].column_letter
+            for cell in column:
+                try:
+                    if len(str(cell.value)) > max_length:
+                        max_length = len(str(cell.value))
+                except:
+                    pass
+            adjusted_width = min(max_length + 2, 50)
+            ws.column_dimensions[column_letter].width = adjusted_width
+        
+        wb.save(output)
+        output.seek(0)
+        return output, None
+    except Exception as e:
+        return None, str(e)
+
+def generate_pdf_report(df, report_title):
+    """Generate PDF report"""
+    if not HAS_PDF:
+        return None, "reportlab not installed"
+    
+    try:
+        output = BytesIO()
+        doc = SimpleDocTemplate(output, pagesize=letter, topMargin=0.5*inch, bottomMargin=0.5*inch)
+        elements = []
+        styles = getSampleStyleSheet()
+        
+        # Title
+        title_style = ParagraphStyle(
+            'CustomTitle',
+            parent=styles['Heading1'],
+            fontSize=18,
+            textColor=colors.HexColor('#002855'),
+            spaceAfter=12,
+            alignment=1  # Center
+        )
+        elements.append(Paragraph(report_title, title_style))
+        elements.append(Paragraph(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", styles['Normal']))
+        elements.append(Spacer(1, 0.3*inch))
+        
+        # Convert dataframe to table data
+        data = [df.columns.tolist()] + df.values.tolist()
+        
+        # Create table
+        table = Table(data)
+        table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#0066CC')),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, 0), 10),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+            ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
+            ('GRID', (0, 0), (-1, -1), 1, colors.black),
+            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.lightgrey]),
+        ]))
+        
+        elements.append(table)
+        doc.build(elements)
+        output.seek(0)
+        return output, None
+    except Exception as e:
+        return None, str(e)
+
+def generate_csv_report(df):
+    """Generate CSV report"""
+    try:
+        output = BytesIO()
+        df.to_csv(output, index=False, encoding='utf-8')
+        output.seek(0)
+        return output, None
+    except Exception as e:
+        return None, str(e)
+
 # Custom CSS
 st.markdown("""
 <style>
@@ -120,6 +261,8 @@ if 'view_ticket_id' not in st.session_state:
     st.session_state.view_ticket_id = None
 if 'edit_ticket_id' not in st.session_state:
     st.session_state.edit_ticket_id = None
+if 'report_preview_data' not in st.session_state:
+    st.session_state.report_preview_data = None
 
 # Header
 col1, col2 = st.columns([3, 1])
@@ -135,6 +278,7 @@ page = st.sidebar.selectbox("Navigate", [
     "📊 Dashboard", 
     "🎫 Tickets",
     "💻 Assets",
+    "📈 Reports",
     "👥 Users", 
     "🔍 Query Builder", 
     "🔌 Connection Test"
@@ -241,9 +385,9 @@ if page == "📊 Dashboard":
             priority_df, error = execute_query(priority_query)
             
             if not error and priority_df is not None and len(priority_df) > 0:
-                colors = {'urgent': '#dc3545', 'high': '#fd7e14', 'medium': '#ffc107', 'low': '#28a745'}
+                colors_map = {'urgent': '#dc3545', 'high': '#fd7e14', 'medium': '#ffc107', 'low': '#28a745'}
                 fig = px.bar(priority_df, x='priority', y='count', color='priority',
-                           color_discrete_map=colors)
+                           color_discrete_map=colors_map)
                 fig.update_layout(height=350, showlegend=False)
                 st.plotly_chart(fig, use_container_width=True)
         
@@ -257,6 +401,267 @@ if page == "📊 Dashboard":
                            color_continuous_scale='Viridis')
                 fig.update_layout(height=350, showlegend=False)
                 st.plotly_chart(fig, use_container_width=True)
+
+elif page == "📈 Reports":
+    st.header("📈 Advanced Reporting")
+    
+    st.markdown("""
+    Generate comprehensive reports with custom date ranges and export to multiple formats.
+    """)
+    
+    # Report Configuration
+    with st.expander("⚙️ Report Configuration", expanded=True):
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            report_type = st.selectbox("Report Type", [
+                "Ticket Summary",
+                "Detailed Ticket Report",
+                "Ticket Performance Metrics",
+                "Tickets by Location",
+                "Tickets by Priority",
+                "Asset Summary",
+                "Asset Deployment Report",
+                "Asset Warranty Report"
+            ])
+        
+        with col2:
+            date_from = st.date_input("From Date", value=datetime.now() - timedelta(days=30))
+        
+        with col3:
+            date_to = st.date_input("To Date", value=datetime.now())
+    
+    # Generate Report Button
+    col1, col2, col3 = st.columns([1, 1, 4])
+    with col1:
+        if st.button("📊 Generate Preview", use_container_width=True):
+            with st.spinner("Generating report..."):
+                # Build query based on report type
+                if report_type == "Ticket Summary":
+                    query = f"""
+                        SELECT 
+                            status,
+                            priority,
+                            COUNT(*) as ticket_count,
+                            location
+                        FROM dbo.Tickets
+                        WHERE created_at >= '{date_from}' AND created_at <= '{date_to}'
+                        GROUP BY status, priority, location
+                        ORDER BY status, priority
+                    """
+                    report_title = f"Ticket Summary Report ({date_from} to {date_to})"
+                
+                elif report_type == "Detailed Ticket Report":
+                    query = f"""
+                        SELECT 
+                            ticket_id,
+                            short_description as subject,
+                            name as customer,
+                            email,
+                            status,
+                            priority,
+                            location,
+                            assigned_to,
+                            created_at,
+                            first_response_at,
+                            resolved_at
+                        FROM dbo.Tickets
+                        WHERE created_at >= '{date_from}' AND created_at <= '{date_to}'
+                        ORDER BY created_at DESC
+                    """
+                    report_title = f"Detailed Ticket Report ({date_from} to {date_to})"
+                
+                elif report_type == "Ticket Performance Metrics":
+                    query = f"""
+                        SELECT 
+                            location,
+                            COUNT(*) as total_tickets,
+                            SUM(CASE WHEN status = 'resolved' THEN 1 ELSE 0 END) as resolved_tickets,
+                            AVG(CASE WHEN first_response_at IS NOT NULL 
+                                THEN DATEDIFF(hour, created_at, first_response_at) 
+                                ELSE NULL END) as avg_response_hours,
+                            AVG(CASE WHEN resolved_at IS NOT NULL 
+                                THEN DATEDIFF(hour, created_at, resolved_at) 
+                                ELSE NULL END) as avg_resolution_hours
+                        FROM dbo.Tickets
+                        WHERE created_at >= '{date_from}' AND created_at <= '{date_to}'
+                        GROUP BY location
+                        ORDER BY total_tickets DESC
+                    """
+                    report_title = f"Ticket Performance Metrics ({date_from} to {date_to})"
+                
+                elif report_type == "Tickets by Location":
+                    query = f"""
+                        SELECT 
+                            location,
+                            status,
+                            priority,
+                            COUNT(*) as ticket_count
+                        FROM dbo.Tickets
+                        WHERE created_at >= '{date_from}' AND created_at <= '{date_to}'
+                        GROUP BY location, status, priority
+                        ORDER BY location, status
+                    """
+                    report_title = f"Tickets by Location Report ({date_from} to {date_to})"
+                
+                elif report_type == "Tickets by Priority":
+                    query = f"""
+                        SELECT 
+                            priority,
+                            status,
+                            COUNT(*) as ticket_count,
+                            AVG(CASE WHEN resolved_at IS NOT NULL 
+                                THEN DATEDIFF(hour, created_at, resolved_at) 
+                                ELSE NULL END) as avg_resolution_hours
+                        FROM dbo.Tickets
+                        WHERE created_at >= '{date_from}' AND created_at <= '{date_to}'
+                        GROUP BY priority, status
+                        ORDER BY CASE priority 
+                            WHEN 'urgent' THEN 1 
+                            WHEN 'high' THEN 2 
+                            WHEN 'medium' THEN 3 
+                            WHEN 'low' THEN 4 END
+                    """
+                    report_title = f"Tickets by Priority Report ({date_from} to {date_to})"
+                
+                elif report_type == "Asset Summary":
+                    query = """
+                        SELECT 
+                            type,
+                            status,
+                            COUNT(*) as asset_count,
+                            location
+                        FROM dbo.Assets
+                        GROUP BY type, status, location
+                        ORDER BY type, status
+                    """
+                    report_title = "Asset Summary Report"
+                
+                elif report_type == "Asset Deployment Report":
+                    query = """
+                        SELECT 
+                            asset_tag,
+                            type,
+                            model,
+                            serial,
+                            status,
+                            location,
+                            assigned_user,
+                            assigned_email,
+                            purchase_date
+                        FROM dbo.Assets
+                        WHERE status = 'Deployed'
+                        ORDER BY location, type
+                    """
+                    report_title = "Asset Deployment Report"
+                
+                elif report_type == "Asset Warranty Report":
+                    query = """
+                        SELECT 
+                            asset_tag,
+                            type,
+                            model,
+                            serial,
+                            location,
+                            assigned_user,
+                            purchase_date,
+                            warranty_expiration,
+                            DATEDIFF(day, GETDATE(), warranty_expiration) as days_until_expiry
+                        FROM dbo.Assets
+                        WHERE warranty_expiration IS NOT NULL
+                        ORDER BY warranty_expiration
+                    """
+                    report_title = "Asset Warranty Report"
+                
+                # Execute query
+                df, error = execute_query(query)
+                
+                if error:
+                    st.error(f"Error generating report: {error}")
+                else:
+                    st.session_state.report_preview_data = {
+                        'df': df,
+                        'title': report_title,
+                        'type': report_type
+                    }
+                    st.success(f"✅ Report generated! {len(df)} rows")
+    
+    with col2:
+        if st.button("🔄 Clear Preview", use_container_width=True):
+            st.session_state.report_preview_data = None
+            st.rerun()
+    
+    # Display Preview
+    if st.session_state.report_preview_data:
+        st.markdown("---")
+        st.subheader("👁️ Report Preview")
+        st.write(f"**{st.session_state.report_preview_data['title']}**")
+        st.write(f"Total Records: **{len(st.session_state.report_preview_data['df'])}**")
+        
+        st.dataframe(st.session_state.report_preview_data['df'], use_container_width=True, height=400)
+        
+        # Export Options
+        st.markdown("---")
+        st.subheader("💾 Export Report")
+        
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            # Excel Export
+            if HAS_EXCEL:
+                excel_file, excel_error = generate_excel_report(
+                    st.session_state.report_preview_data['df'],
+                    st.session_state.report_preview_data['title']
+                )
+                
+                if excel_file and not excel_error:
+                    st.download_button(
+                        label="📗 Download Excel",
+                        data=excel_file,
+                        file_name=f"{st.session_state.report_preview_data['type'].replace(' ', '_')}_{datetime.now().strftime('%Y%m%d')}.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        use_container_width=True
+                    )
+                else:
+                    st.error(f"Excel export error: {excel_error}")
+            else:
+                st.info("📗 Excel export requires openpyxl")
+        
+        with col2:
+            # PDF Export
+            if HAS_PDF:
+                pdf_file, pdf_error = generate_pdf_report(
+                    st.session_state.report_preview_data['df'],
+                    st.session_state.report_preview_data['title']
+                )
+                
+                if pdf_file and not pdf_error:
+                    st.download_button(
+                        label="📕 Download PDF",
+                        data=pdf_file,
+                        file_name=f"{st.session_state.report_preview_data['type'].replace(' ', '_')}_{datetime.now().strftime('%Y%m%d')}.pdf",
+                        mime="application/pdf",
+                        use_container_width=True
+                    )
+                else:
+                    st.error(f"PDF export error: {pdf_error}")
+            else:
+                st.info("📕 PDF export requires reportlab")
+        
+        with col3:
+            # CSV Export
+            csv_file, csv_error = generate_csv_report(st.session_state.report_preview_data['df'])
+            
+            if csv_file and not csv_error:
+                st.download_button(
+                    label="📄 Download CSV",
+                    data=csv_file,
+                    file_name=f"{st.session_state.report_preview_data['type'].replace(' ', '_')}_{datetime.now().strftime('%Y%m%d')}.csv",
+                    mime="text/csv",
+                    use_container_width=True
+                )
+            else:
+                st.error(f"CSV export error: {csv_error}")
 
 elif page == "🎫 Tickets":
     st.header("🎫 Ticket Management")
@@ -427,16 +832,7 @@ elif page == "🎫 Tickets":
             # Notes/Comments Section
             st.subheader("💬 Notes & Comments")
             
-            # Check if ticket_notes table exists, if not show message
-            notes_query = """
-                IF EXISTS (SELECT * FROM sys.tables WHERE name = 'ticket_notes')
-                    SELECT note_id, note_text, created_by, created_at 
-                    FROM dbo.ticket_notes 
-                    WHERE ticket_id = ?
-                    ORDER BY created_at DESC
-            """
-            
-            # For now, show add note form
+            # Add note form
             with st.form("add_note_form"):
                 note_text = st.text_area("Add a note or comment", height=100)
                 submit_note = st.form_submit_button("Add Note")
@@ -810,4 +1206,4 @@ elif page == "🔌 Connection Test":
 
 # Footer
 st.markdown("---")
-st.markdown("*VDH IT Help Desk System - v3.0 with Advanced Ticket Management*")
+st.markdown("*VDH IT Help Desk System - v4.0 with Advanced Reporting*")
