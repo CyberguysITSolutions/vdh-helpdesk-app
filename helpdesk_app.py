@@ -140,15 +140,23 @@ def generate_excel_report(df, report_title):
                     cell.fill = PatternFill(start_color="F2F2F2", end_color="F2F2F2", fill_type="solid")
         
         # Auto-adjust column widths
-        for column in ws.columns:
+        for col_num in range(1, len(df.columns) + 1):
             max_length = 0
-            column_letter = column[0].column_letter
-            for cell in column:
+            column_letter = chr(64 + col_num)
+            
+            # Check header length
+            if col_num <= len(df.columns):
+                max_length = len(str(df.columns[col_num - 1]))
+            
+            # Check data lengths
+            for row_num in range(header_row + 1, ws.max_row + 1):
+                cell = ws.cell(row=row_num, column=col_num)
                 try:
-                    if len(str(cell.value)) > max_length:
+                    if cell.value and len(str(cell.value)) > max_length:
                         max_length = len(str(cell.value))
                 except:
                     pass
+            
             adjusted_width = min(max_length + 2, 50)
             ws.column_dimensions[column_letter].width = adjusted_width
         
