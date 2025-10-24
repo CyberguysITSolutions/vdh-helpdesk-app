@@ -92,6 +92,20 @@ st.markdown("""
         border-radius: 8px;
         border: 1px solid #dee2e6;
     }
+    .ticket-card {
+        background: white;
+        padding: 15px;
+        border-radius: 8px;
+        border-left: 4px solid #007bff;
+        margin-bottom: 10px;
+    }
+    .note-card {
+        background: #f8f9fa;
+        padding: 10px;
+        border-radius: 6px;
+        margin: 10px 0;
+        border-left: 3px solid #6c757d;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -102,6 +116,10 @@ if 'show_add_ticket_form' not in st.session_state:
     st.session_state.show_add_ticket_form = False
 if 'edit_asset_id' not in st.session_state:
     st.session_state.edit_asset_id = None
+if 'view_ticket_id' not in st.session_state:
+    st.session_state.view_ticket_id = None
+if 'edit_ticket_id' not in st.session_state:
+    st.session_state.edit_ticket_id = None
 
 # Header
 col1, col2 = st.columns([3, 1])
@@ -243,92 +261,336 @@ if page == "📊 Dashboard":
 elif page == "🎫 Tickets":
     st.header("🎫 Ticket Management")
     
-    # Add New Ticket Button
-    col1, col2 = st.columns([6, 1])
-    with col2:
-        if st.button("➕ New Ticket"):
-            st.session_state.show_add_ticket_form = not st.session_state.show_add_ticket_form
-    
-    # Show Add Ticket Form
-    if st.session_state.show_add_ticket_form:
-        with st.expander("📝 Create New Ticket", expanded=True):
-            with st.form("new_ticket_form"):
-                col1, col2 = st.columns(2)
-                
-                with col1:
-                    name = st.text_input("Customer Name*")
-                    email = st.text_input("Email*")
-                    phone = st.text_input("Phone Number")
-                    location = st.selectbox("Location*", [
-                        "Crater", "Dinwiddie County", "Greensville/Emporia",
-                        "Surry County", "Prince George", "Sussex County", "Hopewell"
-                    ])
-                
-                with col2:
-                    priority = st.selectbox("Priority*", ["low", "medium", "high", "urgent"])
-                    status = st.selectbox("Status*", ["open", "in_progress", "resolved", "closed"])
-                    short_description = st.text_input("Subject*")
-                
-                description = st.text_area("Description*", height=100)
-                
-                col1, col2 = st.columns([1, 5])
-                with col1:
-                    submit = st.form_submit_button("Submit Ticket")
-                with col2:
-                    cancel = st.form_submit_button("Cancel")
-                
-                if submit:
-                    if name and email and location and short_description and description:
-                        query = """
-                            INSERT INTO dbo.Tickets 
-                            (name, email, phone_number, location, priority, status, short_description, description, created_at)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, GETDATE())
-                        """
-                        success, error = execute_non_query(query, (name, email, phone, location, priority, status, short_description, description))
-                        
-                        if success:
-                            st.success("✅ Ticket created successfully!")
-                            st.session_state.show_add_ticket_form = False
-                            st.rerun()
-                        else:
-                            st.error(f"Error: {error}")
-                    else:
-                        st.error("Please fill in all required fields (*)")
-                
-                if cancel:
-                    st.session_state.show_add_ticket_form = False
+    # Back button if viewing ticket details
+    if st.session_state.view_ticket_id:
+        if st.button("← Back to Ticket List"):
+            st.session_state.view_ticket_id = None
+            st.session_state.edit_ticket_id = None
+            st.rerun()
+        
+        st.markdown("---")
+        
+        # Load ticket details
+        ticket_query = f"""
+            SELECT * FROM dbo.Tickets 
+            WHERE ticket_id = {st.session_state.view_ticket_id}
+        """
+        ticket_df, error = execute_query(ticket_query)
+        
+        if error or ticket_df is None or len(ticket_df) == 0:
+            st.error("Ticket not found")
+            st.session_state.view_ticket_id = None
+        else:
+            ticket = ticket_df.iloc[0]
+            
+            # Ticket Header
+            col1, col2, col3 = st.columns([2, 1, 1])
+            with col1:
+                st.subheader(f"Ticket #{ticket['ticket_id']}: {ticket['short_description']}")
+            with col2:
+                priority_colors = {'low': '🟢', 'medium': '🟡', 'high': '🟠', 'urgent': '🔴'}
+                st.write(f"{priority_colors.get(ticket['priority'], '⚪')} Priority: **{ticket['priority'].upper()}**")
+            with col3:
+                if st.button("✏️ Edit Ticket"):
+                    st.session_state.edit_ticket_id = st.session_state.view_ticket_id
                     st.rerun()
+            
+            st.markdown("---")
+            
+            # Show Edit Form if editing
+            if st.session_state.edit_ticket_id == st.session_state.view_ticket_id:
+                with st.expander("✏️ Edit Ticket", expanded=True):
+                    with st.form("edit_ticket_form"):
+                        col1, col2 = st.columns(2)
+                        
+                        with col1:
+                            status = st.selectbox("Status*", 
+                                ["open", "in_progress", "resolved", "closed"],
+                                index=["open", "in_progress", "resolved", "closed"].index(ticket['status'])
+                            )
+                            priority = st.selectbox("Priority*", 
+                                ["low", "medium", "high", "urgent"],
+                                index=["low", "medium", "high", "urgent"].index(ticket['priority'])
+                            )
+                            # Get list of users for assignment
+                            users_query = "SELECT id, CONCAT(first_name, ' ', last_name) as name FROM dbo.users WHERE role IN ('admin', 'technician') ORDER BY name"
+                            users_df, users_error = execute_query(users_query)
+                            
+                            if not users_error and users_df is not None:
+                                user_options = ["Unassigned"] + users_df['name'].tolist()
+                                current_assigned = ticket['assigned_to'] if ticket['assigned_to'] else "Unassigned"
+                                assigned_to = st.selectbox("Assign To", user_options, 
+                                    index=user_options.index(current_assigned) if current_assigned in user_options else 0
+                                )
+                        
+                        with col2:
+                            short_desc = st.text_input("Subject*", value=ticket['short_description'])
+                            location = st.selectbox("Location*", [
+                                "Crater", "Dinwiddie County", "Greensville/Emporia",
+                                "Surry County", "Prince George", "Sussex County", "Hopewell"
+                            ], index=["Crater", "Dinwiddie County", "Greensville/Emporia", "Surry County", "Prince George", "Sussex County", "Hopewell"].index(ticket['location']) if ticket['location'] in ["Crater", "Dinwiddie County", "Greensville/Emporia", "Surry County", "Prince George", "Sussex County", "Hopewell"] else 0)
+                        
+                        description = st.text_area("Description*", value=ticket['description'], height=100)
+                        
+                        col1, col2 = st.columns([1, 5])
+                        with col1:
+                            submit = st.form_submit_button("Save Changes")
+                        with col2:
+                            cancel = st.form_submit_button("Cancel")
+                        
+                        if submit:
+                            # Build UPDATE query
+                            update_parts = []
+                            params_list = []
+                            
+                            # Check what changed and update accordingly
+                            if status != ticket['status']:
+                                update_parts.append("status = ?")
+                                params_list.append(status)
+                                
+                                # Set first_response_at if moving from open to in_progress
+                                if ticket['status'] == 'open' and status == 'in_progress' and not ticket['first_response_at']:
+                                    update_parts.append("first_response_at = GETDATE()")
+                                
+                                # Set resolved_at if moving to resolved
+                                if status == 'resolved' and not ticket['resolved_at']:
+                                    update_parts.append("resolved_at = GETDATE()")
+                            
+                            if priority != ticket['priority']:
+                                update_parts.append("priority = ?")
+                                params_list.append(priority)
+                            
+                            assigned_value = None if assigned_to == "Unassigned" else assigned_to
+                            if assigned_value != ticket['assigned_to']:
+                                update_parts.append("assigned_to = ?")
+                                params_list.append(assigned_value)
+                            
+                            if short_desc != ticket['short_description']:
+                                update_parts.append("short_description = ?")
+                                params_list.append(short_desc)
+                            
+                            if description != ticket['description']:
+                                update_parts.append("description = ?")
+                                params_list.append(description)
+                            
+                            if location != ticket['location']:
+                                update_parts.append("location = ?")
+                                params_list.append(location)
+                            
+                            if update_parts:
+                                query = f"UPDATE dbo.Tickets SET {', '.join(update_parts)} WHERE ticket_id = ?"
+                                params_list.append(st.session_state.view_ticket_id)
+                                
+                                success, error = execute_non_query(query, tuple(params_list))
+                                
+                                if success:
+                                    st.success("✅ Ticket updated successfully!")
+                                    st.session_state.edit_ticket_id = None
+                                    st.rerun()
+                                else:
+                                    st.error(f"Error: {error}")
+                            else:
+                                st.info("No changes detected")
+                        
+                        if cancel:
+                            st.session_state.edit_ticket_id = None
+                            st.rerun()
+            
+            # Ticket Details
+            st.subheader("📋 Ticket Details")
+            
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.write(f"**Customer:** {ticket['name']}")
+                st.write(f"**Email:** {ticket['email']}")
+                if ticket['phone_number']:
+                    st.write(f"**Phone:** {ticket['phone_number']}")
+                st.write(f"**Location:** {ticket['location']}")
+            
+            with col2:
+                st.write(f"**Status:** {ticket['status']}")
+                st.write(f"**Priority:** {ticket['priority']}")
+                st.write(f"**Assigned To:** {ticket['assigned_to'] if ticket['assigned_to'] else 'Unassigned'}")
+                st.write(f"**Created:** {ticket['created_at']}")
+                if ticket['first_response_at']:
+                    st.write(f"**First Response:** {ticket['first_response_at']}")
+                if ticket['resolved_at']:
+                    st.write(f"**Resolved:** {ticket['resolved_at']}")
+            
+            st.markdown("---")
+            st.subheader("📝 Description")
+            st.write(ticket['description'])
+            
+            st.markdown("---")
+            
+            # Notes/Comments Section
+            st.subheader("💬 Notes & Comments")
+            
+            # Check if ticket_notes table exists, if not show message
+            notes_query = """
+                IF EXISTS (SELECT * FROM sys.tables WHERE name = 'ticket_notes')
+                    SELECT note_id, note_text, created_by, created_at 
+                    FROM dbo.ticket_notes 
+                    WHERE ticket_id = ?
+                    ORDER BY created_at DESC
+            """
+            
+            # For now, show add note form
+            with st.form("add_note_form"):
+                note_text = st.text_area("Add a note or comment", height=100)
+                submit_note = st.form_submit_button("Add Note")
+                
+                if submit_note and note_text:
+                    # First check if table exists
+                    check_table = """
+                        IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'ticket_notes')
+                        BEGIN
+                            CREATE TABLE dbo.ticket_notes (
+                                note_id INT IDENTITY(1,1) PRIMARY KEY,
+                                ticket_id INT NOT NULL,
+                                note_text NVARCHAR(MAX) NOT NULL,
+                                created_by NVARCHAR(100) NOT NULL,
+                                created_at DATETIME DEFAULT GETDATE(),
+                                FOREIGN KEY (ticket_id) REFERENCES dbo.Tickets(ticket_id)
+                            );
+                        END
+                    """
+                    execute_non_query(check_table)
+                    
+                    # Insert note
+                    insert_note = """
+                        INSERT INTO dbo.ticket_notes (ticket_id, note_text, created_by, created_at)
+                        VALUES (?, ?, 'Admin', GETDATE())
+                    """
+                    success, error = execute_non_query(insert_note, (st.session_state.view_ticket_id, note_text))
+                    
+                    if success:
+                        st.success("✅ Note added!")
+                        st.rerun()
+                    else:
+                        st.error(f"Error: {error}")
+            
+            # Display existing notes
+            notes_df, notes_error = execute_query(
+                "SELECT note_id, note_text, created_by, created_at FROM dbo.ticket_notes WHERE ticket_id = ? ORDER BY created_at DESC",
+                (st.session_state.view_ticket_id,)
+            )
+            
+            if not notes_error and notes_df is not None and len(notes_df) > 0:
+                st.markdown("### Previous Notes:")
+                for _, note in notes_df.iterrows():
+                    st.markdown(f"""
+                    <div class="note-card">
+                        <small><strong>{note['created_by']}</strong> - {note['created_at']}</small><br>
+                        {note['note_text']}
+                    </div>
+                    """, unsafe_allow_html=True)
     
-    st.markdown("---")
-    
-    # Filters
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        status_filter = st.selectbox("Status", ["All", "open", "in_progress", "resolved", "closed"])
-    with col2:
-        priority_filter = st.selectbox("Priority", ["All", "low", "medium", "high", "urgent"])
-    with col3:
-        search = st.text_input("🔍 Search", placeholder="Search tickets...")
-    
-    # Build query
-    query = "SELECT ticket_id, short_description, name, email, status, priority, location, created_at FROM dbo.Tickets WHERE 1=1"
-    
-    if status_filter != "All":
-        query += f" AND status = '{status_filter}'"
-    if priority_filter != "All":
-        query += f" AND priority = '{priority_filter}'"
-    if search:
-        query += f" AND (short_description LIKE '%{search}%' OR name LIKE '%{search}%' OR email LIKE '%{search}%')"
-    
-    query += " ORDER BY created_at DESC"
-    
-    df, error = execute_query(query)
-    
-    if error:
-        st.error(f"Error: {error}")
     else:
-        st.write(f"**Total:** {len(df)} tickets")
-        st.dataframe(df, use_container_width=True, hide_index=True)
+        # Ticket List View
+        # Add New Ticket Button
+        col1, col2 = st.columns([6, 1])
+        with col2:
+            if st.button("➕ New Ticket"):
+                st.session_state.show_add_ticket_form = not st.session_state.show_add_ticket_form
+        
+        # Show Add Ticket Form
+        if st.session_state.show_add_ticket_form:
+            with st.expander("📝 Create New Ticket", expanded=True):
+                with st.form("new_ticket_form"):
+                    col1, col2 = st.columns(2)
+                    
+                    with col1:
+                        name = st.text_input("Customer Name*")
+                        email = st.text_input("Email*")
+                        phone = st.text_input("Phone Number")
+                        location = st.selectbox("Location*", [
+                            "Crater", "Dinwiddie County", "Greensville/Emporia",
+                            "Surry County", "Prince George", "Sussex County", "Hopewell"
+                        ])
+                    
+                    with col2:
+                        priority = st.selectbox("Priority*", ["low", "medium", "high", "urgent"])
+                        status = st.selectbox("Status*", ["open", "in_progress", "resolved", "closed"])
+                        short_description = st.text_input("Subject*")
+                    
+                    description = st.text_area("Description*", height=100)
+                    
+                    col1, col2 = st.columns([1, 5])
+                    with col1:
+                        submit = st.form_submit_button("Submit Ticket")
+                    with col2:
+                        cancel = st.form_submit_button("Cancel")
+                    
+                    if submit:
+                        if name and email and location and short_description and description:
+                            query = """
+                                INSERT INTO dbo.Tickets 
+                                (name, email, phone_number, location, priority, status, short_description, description, created_at)
+                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, GETDATE())
+                            """
+                            success, error = execute_non_query(query, (name, email, phone, location, priority, status, short_description, description))
+                            
+                            if success:
+                                st.success("✅ Ticket created successfully!")
+                                st.session_state.show_add_ticket_form = False
+                                st.rerun()
+                            else:
+                                st.error(f"Error: {error}")
+                        else:
+                            st.error("Please fill in all required fields (*)")
+                    
+                    if cancel:
+                        st.session_state.show_add_ticket_form = False
+                        st.rerun()
+        
+        st.markdown("---")
+        
+        # Filters
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            status_filter = st.selectbox("Status", ["All", "open", "in_progress", "resolved", "closed"])
+        with col2:
+            priority_filter = st.selectbox("Priority", ["All", "low", "medium", "high", "urgent"])
+        with col3:
+            search = st.text_input("🔍 Search", placeholder="Search tickets...")
+        
+        # Build query
+        query = "SELECT ticket_id, short_description, name, email, status, priority, location, assigned_to, created_at FROM dbo.Tickets WHERE 1=1"
+        
+        if status_filter != "All":
+            query += f" AND status = '{status_filter}'"
+        if priority_filter != "All":
+            query += f" AND priority = '{priority_filter}'"
+        if search:
+            query += f" AND (short_description LIKE '%{search}%' OR name LIKE '%{search}%' OR email LIKE '%{search}%')"
+        
+        query += " ORDER BY created_at DESC"
+        
+        df, error = execute_query(query)
+        
+        if error:
+            st.error(f"Error: {error}")
+        else:
+            st.write(f"**Total:** {len(df)} tickets")
+            
+            # Display tickets with view button
+            if len(df) > 0:
+                for idx, row in df.iterrows():
+                    col1, col2 = st.columns([9, 1])
+                    with col1:
+                        priority_colors = {'low': '🟢', 'medium': '🟡', 'high': '🟠', 'urgent': '🔴'}
+                        st.markdown(f"""
+                        <div class="ticket-card">
+                            {priority_colors.get(row['priority'], '⚪')} <strong>#{row['ticket_id']}</strong> - {row['short_description']}<br>
+                            <small>Customer: {row['name']} | Status: {row['status']} | Assigned: {row['assigned_to'] if row['assigned_to'] else 'Unassigned'} | Created: {row['created_at']}</small>
+                        </div>
+                        """, unsafe_allow_html=True)
+                    with col2:
+                        if st.button("View", key=f"view_{row['ticket_id']}"):
+                            st.session_state.view_ticket_id = row['ticket_id']
+                            st.rerun()
 
 elif page == "💻 Assets":
     st.header("💻 Asset Management")
@@ -478,7 +740,6 @@ elif page == "💻 Assets":
         
         # Display assets with edit buttons
         if len(df) > 0:
-            # Create clickable table
             for idx, row in df.iterrows():
                 col1, col2 = st.columns([9, 1])
                 with col1:
@@ -549,4 +810,4 @@ elif page == "🔌 Connection Test":
 
 # Footer
 st.markdown("---")
-st.markdown("*VDH IT Help Desk System - v2.0 with Asset Management*")
+st.markdown("*VDH IT Help Desk System - v3.0 with Advanced Ticket Management*")
