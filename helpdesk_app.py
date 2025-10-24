@@ -757,6 +757,51 @@ elif page == "🛒 Procurement":
                     st.write(proc['justification'])
                     st.markdown("---")
                 
+                # Attachments / Photos
+                if proc['attachments']:
+                    st.subheader("📎 Attachments")
+                    try:
+                        import json
+                        import base64
+                        from io import BytesIO
+                        attachments = json.loads(proc['attachments'])
+                        
+                        if attachments:
+                            cols = st.columns(min(len(attachments), 4))
+                            for idx, attachment in enumerate(attachments):
+                                col_idx = idx % 4
+                                with cols[col_idx]:
+                                    filename = attachment.get('filename', 'file')
+                                    file_type = attachment.get('type', '')
+                                    file_data = attachment.get('data', '')
+                                    
+                                    # Display images
+                                    if file_type.startswith('image/'):
+                                        try:
+                                            img_bytes = base64.b64decode(file_data)
+                                            st.image(img_bytes, caption=filename, use_container_width=True)
+                                        except:
+                                            st.write(f"📷 {filename}")
+                                    else:
+                                        # Display file link/info
+                                        st.write(f"📄 {filename}")
+                                        # Offer download
+                                        try:
+                                            file_bytes = base64.b64decode(file_data)
+                                            st.download_button(
+                                                label=f"Download",
+                                                data=file_bytes,
+                                                file_name=filename,
+                                                mime=file_type,
+                                                key=f"download_{idx}"
+                                            )
+                                        except:
+                                            pass
+                            st.markdown("---")
+                    except Exception as e:
+                        st.info("Attachments available but could not be displayed")
+                        st.markdown("---")
+                
                 # Approval Status
                 st.subheader("✅ Approval Status")
                 col1, col2 = st.columns(2)
@@ -973,6 +1018,15 @@ elif page == "🛒 Procurement":
                             
                             edit_justification = st.text_area("Justification*", value=proc['justification'], height=100)
                             
+                            st.markdown("### Update Attachments (Optional)")
+                            st.info("📎 Uploading new files will ADD to existing attachments")
+                            edit_uploaded_files = st.file_uploader(
+                                "Upload additional photos/documents", 
+                                accept_multiple_files=True,
+                                type=['png', 'jpg', 'jpeg', 'pdf', 'doc', 'docx'],
+                                key="edit_file_upload"
+                            )
+                            
                             col1, col2 = st.columns([1, 5])
                             with col1:
                                 save_edit = st.form_submit_button("Save Changes")
@@ -981,19 +1035,54 @@ elif page == "🛒 Procurement":
                             
                             if save_edit:
                                 if edit_name and edit_email and edit_location and edit_vendor and edit_justification:
+                                    # Handle new file uploads
+                                    attachment_list = []
+                                    
+                                    # Load existing attachments
+                                    if proc['attachments']:
+                                        try:
+                                            import json
+                                            attachment_list = json.loads(proc['attachments'])
+                                        except:
+                                            attachment_list = []
+                                    
+                                    # Add new uploads
+                                    if edit_uploaded_files:
+                                        import base64
+                                        for uploaded_file in edit_uploaded_files:
+                                            file_bytes = uploaded_file.read()
+                                            file_b64 = base64.b64encode(file_bytes).decode()
+                                            attachment_list.append({
+                                                'filename': uploaded_file.name,
+                                                'data': file_b64,
+                                                'type': uploaded_file.type,
+                                                'size': len(file_bytes)
+                                            })
+                                    
+                                    attachments_json = json.dumps(attachment_list) if attachment_list else None
+                                    
+                                    # Convert empty strings to None properly
+                                    phone_val = edit_phone if edit_phone else None
+                                    dept_val = edit_department if edit_department else None
+                                    cst_val = edit_cst if edit_cst else None
+                                    coa_val = edit_coa if edit_coa else None
+                                    vendor_contact_val = edit_vendor_contact if edit_vendor_contact else None
+                                    vendor_phone_val = edit_vendor_phone if edit_vendor_phone else None
+                                    vendor_email_val = edit_vendor_email if edit_vendor_email else None
+                                    
                                     update_query = """
                                         UPDATE dbo.Procurement_Requests 
                                         SET requester_name=?, requester_email=?, requester_phone=?, location=?, department=?,
                                             priority=?, delivery_required_by=?, cst_code=?, coa_code=?,
                                             vendor_name=?, vendor_contact=?, vendor_phone=?, vendor_email=?,
-                                            justification=?, updated_at=GETDATE()
+                                            justification=?, attachments=?, updated_at=GETDATE()
                                         WHERE request_id=?
                                     """
                                     success, error = execute_non_query(update_query, (
-                                        edit_name, edit_email, edit_phone or None, edit_location, edit_department or None,
-                                        edit_priority, edit_delivery, edit_cst or None, edit_coa or None,
-                                        edit_vendor, edit_vendor_contact or None, edit_vendor_phone or None, edit_vendor_email or None,
-                                        edit_justification, st.session_state.view_procurement_id
+                                        edit_name, edit_email, phone_val, edit_location, dept_val,
+                                        edit_priority, edit_delivery, cst_val, coa_val,
+                                        edit_vendor, vendor_contact_val, vendor_phone_val, vendor_email_val,
+                                        edit_justification, attachments_json, st.session_state.view_procurement_id
                                     ))
                                     if success:
                                         st.success("✅ Request updated successfully!")
@@ -1051,9 +1140,14 @@ elif page == "🛒 Procurement":
                                             manufacturer, model_number, notes
                                         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                                     """
+                                    # Convert empty strings to None for optional fields
+                                    manufacturer_val = item_manufacturer if item_manufacturer else None
+                                    model_val = item_model if item_model else None
+                                    notes_val = item_notes if item_notes else None
+                                    
                                     success, error = execute_non_query(insert_query, (
                                         st.session_state.view_procurement_id, next_line, item_desc, item_qty, item_price,
-                                        item_manufacturer or None, item_model or None, item_notes or None
+                                        manufacturer_val, model_val, notes_val
                                     ))
                                     if success:
                                         # Update total amount
@@ -1204,6 +1298,14 @@ elif page == "🛒 Procurement":
                         
                         justification = st.text_area("Justification*", height=100)
                         
+                        st.markdown("### Attachments (Optional)")
+                        uploaded_files = st.file_uploader(
+                            "Upload photos/documents (images, PDFs)", 
+                            accept_multiple_files=True,
+                            type=['png', 'jpg', 'jpeg', 'pdf', 'doc', 'docx'],
+                            help="Upload product photos, quotes, or supporting documents"
+                        )
+                        
                         col1, col2 = st.columns([1, 5])
                         with col1:
                             submit = st.form_submit_button("Create Request")
@@ -1221,23 +1323,50 @@ elif page == "🛒 Procurement":
                                 else:
                                     request_number = num_result.iloc[0]['request_number']
                                     
+                                    # Handle file uploads
+                                    attachment_list = []
+                                    if uploaded_files:
+                                        import base64
+                                        import json
+                                        for uploaded_file in uploaded_files:
+                                            # Read file content as base64
+                                            file_bytes = uploaded_file.read()
+                                            file_b64 = base64.b64encode(file_bytes).decode()
+                                            attachment_list.append({
+                                                'filename': uploaded_file.name,
+                                                'data': file_b64,
+                                                'type': uploaded_file.type,
+                                                'size': len(file_bytes)
+                                            })
+                                    
+                                    attachments_json = json.dumps(attachment_list) if attachment_list else None
+                                    
+                                    # Convert empty strings to None properly
+                                    phone_val = requester_phone if requester_phone else None
+                                    dept_val = department if department else None
+                                    cst_val = cst_code if cst_code else None
+                                    coa_val = coa_code if coa_code else None
+                                    vendor_contact_val = vendor_contact if vendor_contact else None
+                                    vendor_phone_val = vendor_phone if vendor_phone else None
+                                    vendor_email_val = vendor_email if vendor_email else None
+                                    
                                     # Insert request
                                     insert_query = """
                                         INSERT INTO dbo.Procurement_Requests (
                                             request_number, request_date, requester_name, requester_email, requester_phone,
                                             location, department, cst_code, coa_code, vendor_name, vendor_contact,
                                             vendor_phone, vendor_email, total_amount, justification, status, priority,
-                                            delivery_required_by, created_by
+                                            delivery_required_by, attachments, created_by
                                         ) OUTPUT INSERTED.request_id
-                                        VALUES (?, GETDATE(), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft', ?, ?, 'System')
+                                        VALUES (?, GETDATE(), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft', ?, ?, ?, 'System')
                                     """
                                     
                                     success, error = execute_non_query(
                                         insert_query,
-                                        (request_number, requester_name, requester_email, requester_phone or None,
-                                         location, department or None, cst_code or None, coa_code or None,
-                                         vendor_name, vendor_contact or None, vendor_phone or None, vendor_email or None,
-                                         total, justification, priority, delivery_date)
+                                        (request_number, requester_name, requester_email, phone_val,
+                                         location, dept_val, cst_val, coa_val,
+                                         vendor_name, vendor_contact_val, vendor_phone_val, vendor_email_val,
+                                         total, justification, priority, delivery_date, attachments_json)
                                     )
                                     
                                     if success:
