@@ -131,7 +131,7 @@ Check `azure_queries.sql` for a comprehensive collection of useful queries inclu
 
 ⚠️ **Important Security Notes:**
 
-- Never commit database credentials to Git
+- Never commit   database credentials to Git
 - Use `.gitignore` to exclude secrets files
 - Store credentials in Streamlit Cloud secrets or Azure Key Vault
 - Enable Azure SQL firewall rules appropriately
