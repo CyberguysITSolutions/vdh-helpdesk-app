@@ -313,6 +313,7 @@ page = st.sidebar.selectbox("Navigate", [
     "📊 Dashboard", 
     "🎫 Tickets",
     "💻 Assets",
+    "🛒 Procurement",
     "📈 Reports",
     "👥 Users", 
     "🔍 Query Builder", 
@@ -607,6 +608,372 @@ if page == "📊 Dashboard":
                 st.plotly_chart(fig, use_container_width=True)
             else:
                 st.info("No asset type data available")
+
+elif page == "🛒 Procurement":
+    st.header("🛒 Procurement Management")
+    
+    # Initialize procurement session states
+    if 'show_create_procurement' not in st.session_state:
+        st.session_state.show_create_procurement = False
+    if 'view_procurement_id' not in st.session_state:
+        st.session_state.view_procurement_id = None
+    if 'procurement_items' not in st.session_state:
+        st.session_state.procurement_items = []
+    
+    # Check if procurement tables exist
+    check_table_query = """
+        SELECT COUNT(*) as table_count
+        FROM INFORMATION_SCHEMA.TABLES 
+        WHERE TABLE_SCHEMA = 'dbo' 
+        AND TABLE_NAME = 'Procurement_Requests'
+    """
+    table_check, error = execute_query(check_table_query)
+    
+    if error or table_check is None or table_check.iloc[0]['table_count'] == 0:
+        st.warning("⚠️ Procurement system not set up yet. Please run the setup SQL script.")
+        st.markdown("""
+        ### Setup Required:
+        1. Download: `setup_procurement_system.sql`
+        2. Run in Azure SQL Query Editor
+        3. Refresh this page
+        
+        [View Setup Instructions](https://github.com/your-repo)
+        """)
+    else:
+        # Procurement is set up - show interface
+        
+        # Back button if viewing details
+        if st.session_state.view_procurement_id:
+            if st.button("← Back to Procurement List"):
+                st.session_state.view_procurement_id = None
+                st.rerun()
+            
+            st.markdown("---")
+            
+            # Load procurement request details
+            proc_query = f"""
+                SELECT pr.*, 
+                    CONCAT(a1.first_name, ' ', a1.last_name) as level1_approver,
+                    CONCAT(a2.first_name, ' ', a2.last_name) as level2_approver
+                FROM dbo.Procurement_Requests pr
+                LEFT JOIN dbo.Procurement_Approvers a1 ON pr.level1_approver_id = a1.approver_id
+                LEFT JOIN dbo.Procurement_Approvers a2 ON pr.level2_approver_id = a2.approver_id
+                WHERE pr.request_id = {st.session_state.view_procurement_id}
+            """
+            proc_df, error = execute_query(proc_query)
+            
+            if error or proc_df is None or len(proc_df) == 0:
+                st.error("Procurement request not found")
+                st.session_state.view_procurement_id = None
+            else:
+                proc = proc_df.iloc[0]
+                
+                # Header
+                col1, col2, col3 = st.columns([3, 1, 1])
+                with col1:
+                    st.subheader(f"Request {proc['request_number']}")
+                with col2:
+                    status_colors = {
+                        'draft': '⚪', 'pending_level1': '🟠', 'pending_level2': '🔵',
+                        'approved': '🟢', 'rejected': '🔴', 'ordered': '🔵', 
+                        'received': '🟢', 'cancelled': '⚫'
+                    }
+                    st.write(f"{status_colors.get(proc['status'], '⚪')} Status: **{proc['status'].upper()}**")
+                with col3:
+                    priority_colors = {'low': '🟢', 'normal': '⚪', 'high': '🟠', 'urgent': '🔴'}
+                    st.write(f"{priority_colors.get(proc['priority'], '⚪')} Priority: **{proc['priority'].upper()}**")
+                
+                st.markdown("---")
+                
+                # Request Details
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    st.subheader("📋 Request Information")
+                    st.write(f"**Request Date:** {proc['request_date']}")
+                    st.write(f"**Requester:** {proc['requester_name']}")
+                    st.write(f"**Email:** {proc['requester_email']}")
+                    if proc['requester_phone']:
+                        st.write(f"**Phone:** {proc['requester_phone']}")
+                    st.write(f"**Location:** {proc['location']}")
+                    if proc['department']:
+                        st.write(f"**Department:** {proc['department']}")
+                
+                with col2:
+                    st.subheader("💰 Financial Information")
+                    st.write(f"**Total Amount:** ${proc['total_amount']:,.2f}")
+                    if proc['cst_code']:
+                        st.write(f"**CST Code:** {proc['cst_code']}")
+                    if proc['coa_code']:
+                        st.write(f"**COA Code:** {proc['coa_code']}")
+                    if proc['prog_code']:
+                        st.write(f"**PROG Code:** {proc['prog_code']}")
+                    if proc['fund_code']:
+                        st.write(f"**FUND Code:** {proc['fund_code']}")
+                
+                st.markdown("---")
+                
+                # Vendor Information
+                if proc['vendor_name']:
+                    st.subheader("🏢 Vendor Information")
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        st.write(f"**Vendor:** {proc['vendor_name']}")
+                        if proc['vendor_contact']:
+                            st.write(f"**Contact:** {proc['vendor_contact']}")
+                    with col2:
+                        if proc['vendor_phone']:
+                            st.write(f"**Phone:** {proc['vendor_phone']}")
+                        if proc['vendor_email']:
+                            st.write(f"**Email:** {proc['vendor_email']}")
+                    st.markdown("---")
+                
+                # Line Items
+                st.subheader("📦 Line Items")
+                items_query = f"""
+                    SELECT * FROM dbo.Procurement_Items 
+                    WHERE request_id = {st.session_state.view_procurement_id}
+                    ORDER BY line_number
+                """
+                items_df, error = execute_query(items_query)
+                
+                if not error and items_df is not None and len(items_df) > 0:
+                    # Display as formatted table
+                    display_df = items_df[['line_number', 'item_description', 'quantity', 'unit_price', 'total_price']].copy()
+                    display_df.columns = ['#', 'Description', 'Qty', 'Unit Price', 'Total']
+                    display_df['Unit Price'] = display_df['Unit Price'].apply(lambda x: f"${x:,.2f}")
+                    display_df['Total'] = display_df['Total'].apply(lambda x: f"${x:,.2f}")
+                    st.dataframe(display_df, use_container_width=True, hide_index=True)
+                    
+                    st.write(f"**Grand Total:** ${items_df['total_price'].sum():,.2f}")
+                else:
+                    st.info("No line items added yet")
+                
+                st.markdown("---")
+                
+                # Justification
+                if proc['justification']:
+                    st.subheader("📝 Justification")
+                    st.write(proc['justification'])
+                    st.markdown("---")
+                
+                # Approval Status
+                st.subheader("✅ Approval Status")
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    st.write("**Level 1 Authorization:**")
+                    if proc['level1_approved_at']:
+                        st.success(f"✅ Approved by {proc['level1_approver']} on {proc['level1_approved_at']}")
+                    elif proc['status'] in ['pending_level1', 'pending_level2', 'approved']:
+                        st.info(f"⏳ Pending: {proc['level1_approver'] if proc['level1_approver'] else 'Not assigned'}")
+                    else:
+                        st.warning("⏸️ Not submitted")
+                
+                with col2:
+                    st.write("**Level 2 Approval:**")
+                    if proc['level2_approved_at']:
+                        st.success(f"✅ Approved by {proc['level2_approver']} on {proc['level2_approved_at']}")
+                    elif proc['status'] == 'pending_level2':
+                        st.info(f"⏳ Pending: {proc['level2_approver'] if proc['level2_approver'] else 'Not assigned'}")
+                    else:
+                        st.warning("⏸️ Awaiting Level 1")
+        
+        else:
+            # List View
+            
+            # Top actions
+            col1, col2 = st.columns([6, 1])
+            with col2:
+                if st.button("➕ New Request"):
+                    st.session_state.show_create_procurement = not st.session_state.show_create_procurement
+            
+            # Create New Request Form
+            if st.session_state.show_create_procurement:
+                with st.expander("📝 Create Procurement Request", expanded=True):
+                    with st.form("new_procurement_form"):
+                        st.markdown("### Request Information")
+                        col1, col2, col3 = st.columns(3)
+                        
+                        with col1:
+                            requester_name = st.text_input("Requester Name*")
+                            requester_email = st.text_input("Email*")
+                            requester_phone = st.text_input("Phone")
+                        
+                        with col2:
+                            location = st.selectbox("Location*", [
+                                "Crater", "Dinwiddie County", "Greensville/Emporia",
+                                "Surry County", "Prince George", "Sussex County", "Hopewell"
+                            ])
+                            department = st.text_input("Department")
+                            priority = st.selectbox("Priority*", ["normal", "low", "high", "urgent"])
+                        
+                        with col3:
+                            delivery_date = st.date_input("Delivery Required By")
+                            
+                            # Get coding options
+                            cst_query = "SELECT DISTINCT code_value FROM dbo.Procurement_Codes WHERE code_type = 'CST' ORDER BY code_value"
+                            cst_df, _ = execute_query(cst_query)
+                            cst_options = [""] + (cst_df['code_value'].tolist() if cst_df is not None else [])
+                            cst_code = st.selectbox("CST Code", cst_options)
+                            
+                            coa_query = "SELECT DISTINCT code_value FROM dbo.Procurement_Codes WHERE code_type = 'COA' ORDER BY code_value"
+                            coa_df, _ = execute_query(coa_query)
+                            coa_options = [""] + (coa_df['code_value'].tolist() if coa_df is not None else [])
+                            coa_code = st.selectbox("COA Code", coa_options)
+                        
+                        st.markdown("### Vendor Information")
+                        col1, col2 = st.columns(2)
+                        
+                        with col1:
+                            vendor_name = st.text_input("Vendor Name*")
+                            vendor_contact = st.text_input("Contact Person")
+                        
+                        with col2:
+                            vendor_phone = st.text_input("Vendor Phone")
+                            vendor_email = st.text_input("Vendor Email")
+                        
+                        st.markdown("### Line Items")
+                        st.info("💡 You can add items after creating the request")
+                        
+                        item_desc = st.text_input("Item Description*")
+                        col1, col2, col3 = st.columns(3)
+                        with col1:
+                            quantity = st.number_input("Quantity*", min_value=1, value=1)
+                        with col2:
+                            unit_price = st.number_input("Unit Price*", min_value=0.01, value=1.00, step=0.01)
+                        with col3:
+                            total = quantity * unit_price
+                            st.metric("Line Total", f"${total:,.2f}")
+                        
+                        justification = st.text_area("Justification*", height=100)
+                        
+                        col1, col2 = st.columns([1, 5])
+                        with col1:
+                            submit = st.form_submit_button("Create Request")
+                        with col2:
+                            cancel = st.form_submit_button("Cancel")
+                        
+                        if submit:
+                            if requester_name and requester_email and location and vendor_name and item_desc and justification:
+                                # Generate request number
+                                gen_num_query = "DECLARE @num VARCHAR(50); EXEC dbo.sp_GenerateProcurementRequestNumber @num OUTPUT; SELECT @num as request_number"
+                                num_result, num_error = execute_query(gen_num_query)
+                                
+                                if num_error or num_result is None:
+                                    st.error("Error generating request number. Please ensure stored procedure exists.")
+                                else:
+                                    request_number = num_result.iloc[0]['request_number']
+                                    
+                                    # Insert request
+                                    insert_query = """
+                                        INSERT INTO dbo.Procurement_Requests (
+                                            request_number, request_date, requester_name, requester_email, requester_phone,
+                                            location, department, cst_code, coa_code, vendor_name, vendor_contact,
+                                            vendor_phone, vendor_email, total_amount, justification, status, priority,
+                                            delivery_required_by, created_by
+                                        ) OUTPUT INSERTED.request_id
+                                        VALUES (?, GETDATE(), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft', ?, ?, 'System')
+                                    """
+                                    
+                                    success, error = execute_non_query(
+                                        insert_query,
+                                        (request_number, requester_name, requester_email, requester_phone or None,
+                                         location, department or None, cst_code or None, coa_code or None,
+                                         vendor_name, vendor_contact or None, vendor_phone or None, vendor_email or None,
+                                         total, justification, priority, delivery_date)
+                                    )
+                                    
+                                    if success:
+                                        # Get the request_id
+                                        get_id_query = f"SELECT request_id FROM dbo.Procurement_Requests WHERE request_number = '{request_number}'"
+                                        id_result, _ = execute_query(get_id_query)
+                                        
+                                        if id_result is not None and len(id_result) > 0:
+                                            request_id = id_result.iloc[0]['request_id']
+                                            
+                                            # Insert line item
+                                            item_query = """
+                                                INSERT INTO dbo.Procurement_Items (
+                                                    request_id, line_number, item_description, quantity, unit_price
+                                                ) VALUES (?, 1, ?, ?, ?)
+                                            """
+                                            execute_non_query(item_query, (request_id, item_desc, quantity, unit_price))
+                                        
+                                        st.success(f"✅ Procurement request {request_number} created successfully!")
+                                        st.session_state.show_create_procurement = False
+                                        st.rerun()
+                                    else:
+                                        st.error(f"Error creating request: {error}")
+                            else:
+                                st.error("Please fill in all required fields (*)")
+                        
+                        if cancel:
+                            st.session_state.show_create_procurement = False
+                            st.rerun()
+            
+            st.markdown("---")
+            
+            # Filters
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                status_filter = st.selectbox("Status", ["All", "draft", "pending_level1", "pending_level2", "approved", "rejected", "ordered", "received"])
+            with col2:
+                priority_filter = st.selectbox("Priority", ["All", "low", "normal", "high", "urgent"])
+            with col3:
+                location_filter = st.selectbox("Location", ["All", "Crater", "Dinwiddie County", "Greensville/Emporia", "Surry County", "Prince George", "Sussex County", "Hopewell"])
+            with col4:
+                search = st.text_input("🔍 Search", placeholder="Search requests...")
+            
+            # Build query
+            query = """
+                SELECT request_id, request_number, request_date, requester_name, vendor_name, 
+                       total_amount, status, priority, location, created_at
+                FROM dbo.Procurement_Requests WHERE 1=1
+            """
+            
+            if status_filter != "All":
+                query += f" AND status = '{status_filter}'"
+            if priority_filter != "All":
+                query += f" AND priority = '{priority_filter}'"
+            if location_filter != "All":
+                query += f" AND location = '{location_filter}'"
+            if search:
+                query += f" AND (request_number LIKE '%{search}%' OR requester_name LIKE '%{search}%' OR vendor_name LIKE '%{search}%')"
+            
+            query += " ORDER BY request_date DESC"
+            
+            df, error = execute_query(query)
+            
+            if error:
+                st.error(f"Error: {error}")
+            elif df is None or len(df) == 0:
+                st.info("No procurement requests found")
+            else:
+                st.write(f"**Total:** {len(df)} requests")
+                
+                # Display requests
+                for idx, row in df.iterrows():
+                    col1, col2 = st.columns([9, 1])
+                    with col1:
+                        status_colors = {
+                            'draft': '⚪', 'pending_level1': '🟠', 'pending_level2': '🔵',
+                            'approved': '🟢', 'rejected': '🔴', 'ordered': '🔵',
+                            'received': '🟢', 'cancelled': '⚫'
+                        }
+                        priority_colors = {'low': '🟢', 'normal': '⚪', 'high': '🟠', 'urgent': '🔴'}
+                        
+                        st.markdown(f"""
+                        <div class="ticket-card">
+                            {status_colors.get(row['status'], '⚪')} {priority_colors.get(row['priority'], '⚪')} 
+                            <strong>{row['request_number']}</strong> - {row['vendor_name']}<br>
+                            <small>Requester: {row['requester_name']} | Amount: ${row['total_amount']:,.2f} | Location: {row['location']} | Date: {row['request_date']}</small>
+                        </div>
+                        """, unsafe_allow_html=True)
+                    with col2:
+                        if st.button("View", key=f"view_proc_{row['request_id']}"):
+                            st.session_state.view_procurement_id = row['request_id']
+                            st.rerun()
 
 elif page == "📈 Reports":
     st.header("📈 Advanced Reporting")
