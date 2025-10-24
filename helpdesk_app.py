@@ -8,7 +8,7 @@ from io import BytesIO
 import base64
 
 # Page configuration
-st.set_page_config(page_title="VDH IT Help Desk", page_icon="🎫", layout="wide")
+st.set_page_config(page_title="VDH Service Center", page_icon="🏥", layout="wide")
 
 # Try to import pyodbc
 try:
@@ -224,9 +224,10 @@ def generate_csv_report(df):
     except Exception as e:
         return None, str(e)
 
-# Custom CSS
+# Custom CSS - VDH Color Scheme
 st.markdown("""
 <style>
+    /* VDH Colors: Navy Blue #002855, Orange #FF6B35 */
     .metric-card {
         background: white;
         padding: 20px;
@@ -235,6 +236,12 @@ st.markdown("""
     }
     .stButton>button {
         width: 100%;
+        background-color: #FF6B35;
+        color: white;
+    }
+    .stButton>button:hover {
+        background-color: #e55a2b;
+        color: white;
     }
     div[data-testid="stExpander"] {
         background-color: #f8f9fa;
@@ -245,7 +252,7 @@ st.markdown("""
         background: white;
         padding: 15px;
         border-radius: 8px;
-        border-left: 4px solid #007bff;
+        border-left: 4px solid #FF6B35;
         margin-bottom: 10px;
     }
     .note-card {
@@ -253,7 +260,22 @@ st.markdown("""
         padding: 10px;
         border-radius: 6px;
         margin: 10px 0;
-        border-left: 3px solid #6c757d;
+        border-left: 3px solid #002855;
+    }
+    /* Header styling */
+    h1, h2, h3 {
+        color: #002855;
+    }
+    /* Sidebar styling */
+    [data-testid="stSidebar"] {
+        background-color: #002855;
+    }
+    [data-testid="stSidebar"] .stSelectbox label {
+        color: white;
+    }
+    /* Metric styling */
+    [data-testid="stMetricValue"] {
+        color: #002855;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -272,12 +294,17 @@ if 'edit_ticket_id' not in st.session_state:
 if 'report_preview_data' not in st.session_state:
     st.session_state.report_preview_data = None
 
-# Header
-col1, col2 = st.columns([3, 1])
+# Header with VDH Logo
+col1, col2, col3 = st.columns([1, 4, 1])
 with col1:
-    st.title("🎫 VDH IT Help Desk System")
+    try:
+        st.image("VDH-logo.png", width=120)
+    except:
+        st.markdown("### 🏥")
 with col2:
-    st.markdown("### Welcome, Admin")
+    st.markdown("<h1 style='color: #002855; margin-top: 20px;'>Service Center</h1>", unsafe_allow_html=True)
+with col3:
+    st.markdown("<p style='text-align: right; margin-top: 30px;'><strong>Admin</strong></p>", unsafe_allow_html=True)
 
 st.markdown("---")
 
@@ -303,6 +330,8 @@ if page == "📊 Dashboard":
                 COUNT(*) as total_tickets,
                 SUM(CASE WHEN status = 'open' THEN 1 ELSE 0 END) as open_tickets,
                 SUM(CASE WHEN status = 'in_progress' THEN 1 ELSE 0 END) as in_progress_tickets,
+                SUM(CASE WHEN status = 'on_hold' THEN 1 ELSE 0 END) as on_hold_tickets,
+                SUM(CASE WHEN status = 'waiting_customer_response' THEN 1 ELSE 0 END) as waiting_tickets,
                 SUM(CASE WHEN status = 'resolved' THEN 1 ELSE 0 END) as resolved_tickets,
                 SUM(CASE WHEN priority = 'urgent' THEN 1 ELSE 0 END) as urgent_tickets
             FROM dbo.Tickets
@@ -355,32 +384,91 @@ if page == "📊 Dashboard":
         
         st.markdown("---")
         
-        # Charts Row 1
+        # Charts Row 1 - Tickets by Status and Location
         col1, col2 = st.columns(2)
         
         with col1:
             st.subheader("📊 Tickets by Status")
-            status_query = "SELECT status, COUNT(*) as count FROM dbo.Tickets GROUP BY status"
+            status_query = """
+                SELECT 
+                    CASE status
+                        WHEN 'waiting_customer_response' THEN 'Waiting Customer'
+                        WHEN 'on_hold' THEN 'On Hold'
+                        WHEN 'in_progress' THEN 'In Progress'
+                        ELSE UPPER(LEFT(status, 1)) + LOWER(SUBSTRING(status, 2, LEN(status)))
+                    END as status_display,
+                    COUNT(*) as count 
+                FROM dbo.Tickets 
+                GROUP BY status
+                ORDER BY count DESC
+            """
             status_df, error = execute_query(status_query)
             
             if not error and status_df is not None and len(status_df) > 0:
-                fig = px.pie(status_df, values='count', names='status',
-                           color_discrete_sequence=px.colors.qualitative.Set3)
-                fig.update_layout(height=350)
+                # VDH color scheme for status
+                status_colors = {
+                    'Open': '#FF6B35',
+                    'In Progress': '#002855',
+                    'On Hold': '#FFC107',
+                    'Waiting Customer': '#17A2B8',
+                    'Resolved': '#28A745',
+                    'Closed': '#6C757D'
+                }
+                
+                fig = px.pie(
+                    status_df, 
+                    values='count', 
+                    names='status_display',
+                    color='status_display',
+                    color_discrete_map=status_colors,
+                    hover_data=['count']
+                )
+                fig.update_traces(
+                    textposition='inside',
+                    textinfo='percent+label',
+                    hovertemplate='<b>%{label}</b><br>Count: %{value}<br>Percentage: %{percent}<extra></extra>'
+                )
+                fig.update_layout(height=350, showlegend=True)
                 st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.info("No status data available")
         
         with col2:
-            st.subheader("💻 Assets by Status")
-            asset_status_query = "SELECT status, COUNT(*) as count FROM dbo.Assets GROUP BY status"
-            asset_status_df, error = execute_query(asset_status_query)
+            st.subheader("📍 Tickets by Location")
+            location_query = """
+                SELECT location, COUNT(*) as count
+                FROM dbo.Tickets
+                WHERE location IS NOT NULL
+                GROUP BY location
+                ORDER BY count DESC
+            """
+            location_df, error = execute_query(location_query)
             
-            if not error and asset_status_df is not None and len(asset_status_df) > 0:
-                fig = px.pie(asset_status_df, values='count', names='status',
-                           color_discrete_sequence=px.colors.qualitative.Pastel)
-                fig.update_layout(height=350)
+            if not error and location_df is not None and len(location_df) > 0:
+                fig = px.bar(
+                    location_df, 
+                    x='count', 
+                    y='location',
+                    orientation='h',
+                    color='count',
+                    color_continuous_scale=[[0, '#FF6B35'], [0.5, '#002855'], [1, '#001a33']],
+                    hover_data={'count': True, 'location': False}
+                )
+                fig.update_traces(
+                    hovertemplate='<b>%{y}</b><br>Tickets: %{x}<extra></extra>'
+                )
+                fig.update_layout(
+                    height=350,
+                    showlegend=False,
+                    xaxis_title="Number of Tickets",
+                    yaxis_title="Location",
+                    coloraxis_showscale=False
+                )
                 st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.info("No location data available")
         
-        # Charts Row 2
+        # Charts Row 2 - Priority and Assets
         col1, col2 = st.columns(2)
         
         with col1:
@@ -393,11 +481,104 @@ if page == "📊 Dashboard":
             priority_df, error = execute_query(priority_query)
             
             if not error and priority_df is not None and len(priority_df) > 0:
-                colors_map = {'urgent': '#dc3545', 'high': '#fd7e14', 'medium': '#ffc107', 'low': '#28a745'}
-                fig = px.bar(priority_df, x='priority', y='count', color='priority',
-                           color_discrete_map=colors_map)
-                fig.update_layout(height=350, showlegend=False)
+                # VDH colors for priority
+                priority_colors_map = {
+                    'urgent': '#DC3545',
+                    'high': '#FF6B35', 
+                    'medium': '#FFC107',
+                    'low': '#28A745'
+                }
+                fig = px.bar(
+                    priority_df, 
+                    x='priority', 
+                    y='count',
+                    color='priority',
+                    color_discrete_map=priority_colors_map,
+                    hover_data={'priority': False, 'count': True}
+                )
+                fig.update_traces(
+                    hovertemplate='<b>%{x}</b><br>Count: %{y}<extra></extra>'
+                )
+                fig.update_layout(
+                    height=350,
+                    showlegend=False,
+                    xaxis_title="Priority Level",
+                    yaxis_title="Count"
+                )
                 st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.info("No priority data available")
+        
+        with col2:
+            st.subheader("📦 Assets by Location")
+            asset_location_query = """
+                SELECT location, COUNT(*) as count
+                FROM dbo.Assets
+                WHERE location IS NOT NULL
+                GROUP BY location
+                ORDER BY count DESC
+            """
+            asset_location_df, error = execute_query(asset_location_query)
+            
+            if not error and asset_location_df is not None and len(asset_location_df) > 0:
+                fig = px.bar(
+                    asset_location_df, 
+                    x='count', 
+                    y='location',
+                    orientation='h',
+                    color='count',
+                    color_continuous_scale=[[0, '#FF6B35'], [0.5, '#002855'], [1, '#001a33']],
+                    hover_data={'count': True, 'location': False}
+                )
+                fig.update_traces(
+                    hovertemplate='<b>%{y}</b><br>Assets: %{x}<extra></extra>'
+                )
+                fig.update_layout(
+                    height=350,
+                    showlegend=False,
+                    xaxis_title="Number of Assets",
+                    yaxis_title="Location",
+                    coloraxis_showscale=False
+                )
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.info("No asset location data available")
+        
+        # Charts Row 3 - Asset Status and Type
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.subheader("💻 Assets by Status")
+            asset_status_query = "SELECT status, COUNT(*) as count FROM dbo.Assets GROUP BY status"
+            asset_status_df, error = execute_query(asset_status_query)
+            
+            if not error and asset_status_df is not None and len(asset_status_df) > 0:
+                # VDH colors for asset status
+                asset_status_colors = {
+                    'Deployed': '#002855',
+                    'In-Stock': '#28A745',
+                    'Surplus': '#6C757D',
+                    'Repair': '#FF6B35',
+                    'Retired': '#343A40',
+                    'Unaccounted': '#DC3545'
+                }
+                fig = px.pie(
+                    asset_status_df, 
+                    values='count', 
+                    names='status',
+                    color='status',
+                    color_discrete_map=asset_status_colors,
+                    hover_data=['count']
+                )
+                fig.update_traces(
+                    textposition='inside',
+                    textinfo='percent+label',
+                    hovertemplate='<b>%{label}</b><br>Count: %{value}<br>Percentage: %{percent}<extra></extra>'
+                )
+                fig.update_layout(height=350, showlegend=True)
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.info("No asset status data available")
         
         with col2:
             st.subheader("📦 Assets by Type")
@@ -405,10 +586,27 @@ if page == "📊 Dashboard":
             asset_type_df, error = execute_query(asset_type_query)
             
             if not error and asset_type_df is not None and len(asset_type_df) > 0:
-                fig = px.bar(asset_type_df, x='type', y='count', color='count',
-                           color_continuous_scale='Viridis')
-                fig.update_layout(height=350, showlegend=False)
+                fig = px.bar(
+                    asset_type_df, 
+                    x='type', 
+                    y='count',
+                    color='count',
+                    color_continuous_scale=[[0, '#FF6B35'], [0.5, '#002855'], [1, '#001a33']],
+                    hover_data={'type': False, 'count': True}
+                )
+                fig.update_traces(
+                    hovertemplate='<b>%{x}</b><br>Count: %{y}<extra></extra>'
+                )
+                fig.update_layout(
+                    height=350,
+                    showlegend=False,
+                    xaxis_title="Asset Type",
+                    yaxis_title="Count",
+                    coloraxis_showscale=False
+                )
                 st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.info("No asset type data available")
 
 elif page == "📈 Reports":
     st.header("📈 Advanced Reporting")
@@ -718,8 +916,8 @@ elif page == "🎫 Tickets":
                         
                         with col1:
                             status = st.selectbox("Status*", 
-                                ["open", "in_progress", "resolved", "closed"],
-                                index=["open", "in_progress", "resolved", "closed"].index(ticket['status'])
+                                ["open", "in_progress", "on_hold", "waiting_customer_response", "resolved", "closed"],
+                                index=["open", "in_progress", "on_hold", "waiting_customer_response", "resolved", "closed"].index(ticket['status'])
                             )
                             priority = st.selectbox("Priority*", 
                                 ["low", "medium", "high", "urgent"],
@@ -916,7 +1114,7 @@ elif page == "🎫 Tickets":
                     
                     with col2:
                         priority = st.selectbox("Priority*", ["low", "medium", "high", "urgent"])
-                        status = st.selectbox("Status*", ["open", "in_progress", "resolved", "closed"])
+                        status = st.selectbox("Status*", ["open", "in_progress", "on_hold", "waiting_customer_response", "resolved", "closed"])
                         short_description = st.text_input("Subject*")
                     
                     description = st.text_area("Description*", height=100)
@@ -954,7 +1152,7 @@ elif page == "🎫 Tickets":
         # Filters
         col1, col2, col3 = st.columns(3)
         with col1:
-            status_filter = st.selectbox("Status", ["All", "open", "in_progress", "resolved", "closed"])
+            status_filter = st.selectbox("Status", ["All", "open", "in_progress", "on_hold", "waiting_customer_response", "resolved", "closed"])
         with col2:
             priority_filter = st.selectbox("Priority", ["All", "low", "medium", "high", "urgent"])
         with col3:
@@ -1214,4 +1412,4 @@ elif page == "🔌 Connection Test":
 
 # Footer
 st.markdown("---")
-st.markdown("*VDH IT Help Desk System - v4.0 with Advanced Reporting*")
+st.markdown("*VDH Service Center - v5.0 | Virginia Department of Health © 2025*")
