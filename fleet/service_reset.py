@@ -7,9 +7,9 @@ def upload_receipt_to_blob(file_obj):
     blob_conf = st.secrets.get("blob")
     if not blob_conf:
         return None
-    bsc = BlobServiceClient(account_url=f"https://{blob_conf['account_name']}.blob.core.windows.net", credential=blob_conf['key'])
+    bsc = BlobServiceClient(account_url=f"https://{{blob_conf['account_name']}}.blob.core.windows.net", credential=blob_conf['key'])
     container = blob_conf.get('container', 'receipts')
-    blob_name = f"receipts/{uuid.uuid4()}-{file_obj.name}"
+    blob_name = f"receipts/{{uuid.uuid4()}}-{{file_obj.name}}"
     blob_client = bsc.get_blob_client(container=container, blob=blob_name)
     blob_client.upload_blob(file_obj.getvalue(), overwrite=True)
     return blob_client.url
@@ -32,7 +32,7 @@ def reset_service_ui(vehicle_id):
             try:
                 receipt_url = upload_receipt_to_blob(receipt)
             except Exception as e:
-                st.warning(f"Receipt upload failed: {e}. Proceeding without receipt.")
+                st.warning(f"Receipt upload failed: {{e}}. Proceeding without receipt.")
         payload = {
             'vehicle_id': vehicle_id,
             'service_center': service_center,
@@ -43,10 +43,10 @@ def reset_service_ui(vehicle_id):
             'cost': cost if cost > 0 else None,
             'receipt_file_url': receipt_url,
             'notes': notes,
-            'created_by': st.session_state.get('user_id')  # adapt to your auth model
+            'created_by': st.session_state.get('user_id')
         }
         try:
             fleet_db.create_service_log(payload)
             st.success("Service log created and miles reset.")
         except Exception as e:
-            st.error(f"Failed to create service log: {e}")
+            st.error(f"Failed to create service log: {{e}}")

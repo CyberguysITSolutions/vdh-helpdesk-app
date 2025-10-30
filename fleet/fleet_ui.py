@@ -5,7 +5,7 @@ from datetime import datetime
 
 LOCATIONS = [
     "Chesapeake", "Richmond", "Norfolk", "Roanoke", "Harrisonburg", "Charlottesville", "Alexandria"
-]  # replace with your actual 7 VDH locations or load from config/db
+]
 
 def vehicle_select_list():
     st.subheader("Available Vehicles")
@@ -20,11 +20,11 @@ def vehicle_select_list():
         with col:
             if v.get('photo_url'):
                 st.image(v['photo_url'], width=150)
-            label = f"{v['make_model']} ({v['license_plate']})"
+            label = f"{{v['make_model']}} ({{v['license_plate']}})"
             if is_overdue:
-                st.button(f"{label} — Overdue for service", key=f"veh_{v['id']}", disabled=True)
+                st.button(f"{{label}} — Overdue for service", key=f"veh_{{v['id']}}", disabled=True)
             else:
-                if st.button(label, key=f"veh_btn_{v['id']}"):
+                if st.button(label, key=f"veh_btn_{{v['id']}}"):
                     st.session_state['selected_vehicle'] = v['id']
     return st.session_state.get('selected_vehicle')
 
@@ -36,7 +36,6 @@ def sign_out_form():
         return
     with st.form("signout"):
         st.markdown("Fill driver and trip details")
-        # Optionally, if users are in your DB you can present a dropdown for drivers; default to text fields for simplicity
         driver_name = st.text_input("Driver name")
         driver_phone = st.text_input("Driver phone")
         driver_email = st.text_input("Driver email")
@@ -62,7 +61,7 @@ def sign_out_form():
             fleet_db.create_trip(payload)
             st.success("Vehicle signed out.")
         except Exception as e:
-            st.error(f"Failed to sign out vehicle: {e}")
+            st.error(f"Failed to sign out vehicle: {{e}}")
 
 def return_form():
     st.header("Return Vehicle")
@@ -70,7 +69,7 @@ def return_form():
     if not trips:
         st.info("No active trips.")
         return
-    options = {f"#{t['id']} - Veh {t['vehicle_id']} - {t['driver_name']} ({t['work_location']})": t['id'] for t in trips}
+    options = {f"#{{t['id']}} - Veh {{t['vehicle_id']}} - {{t['driver_name']}} ({{t['work_location']}})": t['id'] for t in trips}
     choice = st.selectbox("Active trips", options=list(options.keys()))
     trip_id = options[choice]
     mileage_return = st.number_input("Mileage upon return", min_value=0, step=1)
@@ -80,7 +79,7 @@ def return_form():
             fleet_db.complete_trip(trip_id, int(mileage_return), return_time)
             st.success("Trip completed and vehicle updated.")
         except Exception as e:
-            st.error(f"Failed to complete return: {e}")
+            st.error(f"Failed to complete return: {{e}}")
 
 def admin_dashboard():
     st.header("Fleet Admin Dashboard")
@@ -89,14 +88,12 @@ def admin_dashboard():
     if df.empty:
         st.info("No vehicles to display.")
         return
-    # status counts
     counts = df['status'].value_counts().to_dict()
     st.metric("Motorpool", counts.get('motorpool', 0))
     st.metric("Dispatched", counts.get('dispatched', 0))
     st.metric("Maintenance", counts.get('maintenance', 0))
     st.metric("Out of Service", counts.get('out_of_service', 0))
     st.markdown("---")
-    # show a table; grey out overdue rows visually using a conditional style (Streamlit doesn't have row styles; provide column)
     df_display = df[['id', 'make_model', 'license_plate', 'current_mileage', 'miles_until_service', 'status', 'miles_per_month']]
     st.dataframe(df_display.sort_values('miles_per_month', ascending=True))
     st.markdown("Dispatched vehicles (active trips):")
@@ -122,7 +119,7 @@ def reports_ui():
         v_id = int(vehicle_id) if vehicle_id.strip().isdigit() else None
         st.info("Generating report...")
         df = fleet_db.generate_advanced_report(start_date=from_date, end_date=to_date, location=location, vehicle_id=v_id, driver_name=driver_name or None, status=None if status=="All" else status)
-        st.success(f"Report generated: {len(df)} rows")
+        st.success(f"Report generated: {{len(df)}} rows")
         st.dataframe(df)
         csv = df.to_csv(index=False).encode('utf-8')
         st.download_button(label="Download CSV", data=csv, file_name="fleet_report.csv", mime="text/csv")

@@ -3,13 +3,12 @@ import streamlit as st
 import pandas as pd
 from datetime import datetime
 
-# DB helper using st.secrets["database"] as in the main repo
 def get_conn():
     db = st.secrets["database"]
     conn_str = (
         "DRIVER={ODBC Driver 18 for SQL Server};"
-        f"SERVER={db['server']};DATABASE={db['database']};"
-        f"UID={db['username']};PWD={db['password']};Encrypt=yes;TrustServerCertificate=no;"
+        f"SERVER={{db['server']}};DATABASE={{db['database']}};"
+        f"UID={{db['username']}};PWD={{db['password']}};Encrypt=yes;TrustServerCertificate=no;"
     )
     return pyodbc.connect(conn_str, autocommit=False)
 
@@ -75,7 +74,6 @@ def create_trip(payload):
         payload['departure_time'],
         payload['mileage_departure'],
     ))
-    # mark vehicle as dispatched
     cur.execute("UPDATE dbo.vehicles SET status='dispatched', updated_at=SYSUTCDATETIME() WHERE id = ?", (payload['vehicle_id'],))
     conn.commit()
     conn.close()
@@ -94,13 +92,11 @@ def complete_trip(trip_id, mileage_return, return_time=None):
     if miles_used < 0:
         conn.close()
         raise ValueError("Return mileage less than departure mileage")
-    # update trip
     cur.execute("""
       UPDATE dbo.trip_logs
       SET mileage_return = ?, return_time = ?, miles_used = ?, status = 'completed', updated_at = SYSUTCDATETIME()
       WHERE id = ?
     """, (mileage_return, return_time, miles_used, trip_id))
-    # update vehicle mileage and miles_until_service
     cur.execute("SELECT last_service_mileage FROM dbo.vehicles WHERE id = ?", (vehicle_id,))
     v_row = cur.fetchone()
     last_service_mileage = v_row[0] if v_row else None
@@ -108,7 +104,6 @@ def complete_trip(trip_id, mileage_return, return_time=None):
     if last_service_mileage is not None:
         new_until = 4000 - (mileage_return - last_service_mileage)
         cur.execute("UPDATE dbo.vehicles SET miles_until_service = ? WHERE id = ?", (new_until, vehicle_id))
-    # set vehicle status back to motorpool unless admin set otherwise (could be a policy)
     cur.execute("UPDATE dbo.vehicles SET status='motorpool' WHERE id = ?", (vehicle_id,))
     conn.commit()
     conn.close()
@@ -132,9 +127,9 @@ def create_service_log(payload):
         payload.get('notes'),
         payload.get('created_by')
     ))
-    # update vehicle last_service_mileage -> set last_service_mileage to current_mileage
     cur.execute("SELECT current_mileage FROM dbo.vehicles WHERE id = ?", (payload['vehicle_id'],))
-    cm = cur.fetchone()[0] if cur.rowcount else None
+    cm_row = cur.fetchone()
+    cm = cm_row[0] if cm_row else None
     if cm is not None:
         cur.execute("UPDATE dbo.vehicles SET last_service_mileage = ?, last_service_date = ?, miles_until_service = 4000, updated_at = SYSUTCDATETIME() WHERE id = ?",
                     (cm, payload.get('date_of_service'), payload['vehicle_id']))
@@ -156,7 +151,6 @@ def fetch_active_trips():
     return rows
 
 def generate_advanced_report(start_date=None, end_date=None, location=None, vehicle_id=None, driver_name=None, status=None):
-    # returns a pandas DataFrame suitable for CSV export
     conn = get_conn()
     cur = conn.cursor()
     q = """
@@ -181,7 +175,7 @@ def generate_advanced_report(start_date=None, end_date=None, location=None, vehi
         params.append(vehicle_id)
     if driver_name:
         q += " AND t.driver_name LIKE ?"
-        params.append(f"%{driver_name}%")
+        params.append(f"%{{driver_name}}%")
     if status:
         q += " AND t.status = ?"
         params.append(status)
