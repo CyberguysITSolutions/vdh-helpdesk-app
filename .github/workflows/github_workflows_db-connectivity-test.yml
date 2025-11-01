@@ -53,4 +53,4 @@ jobs:
       - name: Run DB connectivity test
         run: |
           python test_db_ci.py
-        continue-on-error: false
+        continue-on-error: false  
