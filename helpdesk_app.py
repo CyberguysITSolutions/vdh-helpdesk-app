@@ -1,28 +1,25 @@
-# ----- Add / paste these blocks into helpdesk_app.py -----
-# 1) Imports (near other top-level imports)
+# === START: Add these blocks into helpdesk_app.py ===
+# 1) Top-level imports (add near other imports)
 import os
-import pyodbc
 import logging
-
+import pyodbc
 logger = logging.getLogger(__name__)
 
-# 2) DB connection helper (use DB_CONN env var if present; otherwise build DSN-less string)
+# 2) DB connection helper (add after imports)
 def get_db_connection():
     """
-    Return a pyodbc.Connection.
-    Priority:
-    1) Use exact connection string from env DB_CONN
-    2) Build DSN-less connection from DB_DRIVER, DB_SERVER, DB_NAME, DB_USER, DB_PASS
-    Ensure you set the env vars locally / in App Settings.
+    Returns a pyodbc.Connection. Priority:
+      1) Use full connection string from DB_CONN env var
+      2) Build DSN-less connection from DB_DRIVER/DB_SERVER/DB_NAME/DB_USER/DB_PASS
+    Set DB_CONN locally or in App Settings for deployments.
     """
     conn_str = os.getenv("DB_CONN")
     if conn_str:
         try:
             return pyodbc.connect(conn_str, autocommit=True)
         except Exception:
-            logger.exception("DB_CONN failed, falling back to built connection string")
+            logger.exception("DB_CONN connect failed, falling back to built string")
 
-    # Fallback: build DSN-less connection string
     driver = os.getenv("DB_DRIVER", "ODBC Driver 18 for SQL Server")
     server = os.getenv("DB_SERVER", "localhost")
     database = os.getenv("DB_NAME", "mydb")
@@ -32,17 +29,15 @@ def get_db_connection():
     if user and password:
         conn_str = f"DRIVER={{{driver}}};SERVER={server};DATABASE={database};UID={user};PWD={password};Encrypt=no"
     else:
-        # Trusted connection if no credentials provided
         conn_str = f"DRIVER={{{driver}}};SERVER={server};DATABASE={database};Trusted_Connection=yes;Encrypt=no"
 
     try:
         return pyodbc.connect(conn_str, autocommit=True)
-    except Exception as e:
+    except Exception:
         logger.exception("Failed to connect to DB using built connection string")
         raise
 
-# 3) Navigation: ensure 'Fleet Management' is in your sidebar menu and calls the fleet UI
-# Find your existing menu_options or replace the menu construction with this block (below).
+# 3) Sidebar menu (replace or merge with existing menu creation)
 menu_options = [
     "Dashboard",
     "Tickets",
@@ -50,27 +45,26 @@ menu_options = [
     "Procurement",
     "Reports",
     "Users",
-    "Fleet Management",     # <-- added
+    "Fleet Management",     # <-- NEW
     "Query Builder",
     "Connection Test"
 ]
 
-# Re-use your existing selection variable or create a new selectbox:
 selection = st.sidebar.selectbox("Navigate", menu_options, index=0)
 
-# When user selects Fleet Management, import & show fleet UI (pass db connection)
+# 4) Fleet selection wiring (place near other selection handlers)
 if selection == "Fleet Management":
-    # keep import here to avoid importing fleet code when not needed
     try:
+        # import lazily to avoid importing if not selected
         from fleet import ui as fleet_ui
     except Exception:
-        st.error("Fleet module not found. Ensure fleet/ui.py exists in the repo and exports show_fleet_page().")
+        st.error("Fleet module not found. Ensure fleet/ui.py exists and exports show_fleet_page(conn).")
     else:
         try:
             conn = get_db_connection()
         except Exception:
             st.error("Unable to connect to database. Check DB_CONN or DB_* env vars and installed ODBC driver.")
         else:
-            # Expect fleet_ui.show_fleet_page(conn) to exist; adjust if the API is different
+            # call the fleet UI; adjust function name if your module differs
             fleet_ui.show_fleet_page(conn)
-# ----- end of snippet -----
+# === END: Add these blocks ===
