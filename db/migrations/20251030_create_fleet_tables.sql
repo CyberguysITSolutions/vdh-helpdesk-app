@@ -13,29 +13,29 @@ CREATE TABLE dbo.vehicles (
   current_mileage INT NOT NULL DEFAULT 0,
   last_service_mileage INT NULL,
   last_service_date DATETIME2 NULL,
-  miles_until_service INT NOT NULL DEFAULT 4000,
-  status NVARCHAR(32) NOT NULL DEFAULT 'motorpool',
+  miles_until_service INT NOT NULL DEFAULT 4000, -- derived but stored for fast queries
+  status NVARCHAR(32) NOT NULL DEFAULT 'motorpool', -- dispatched, motorpool, maintenance, out_of_service
   created_at DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
   updated_at DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME()
 );
 
--- Trip logs (includes work_location)
+-- Trip logs (added work_location)
 CREATE TABLE dbo.trip_logs (
   id INT IDENTITY(1,1) PRIMARY KEY,
   vehicle_id INT NOT NULL REFERENCES dbo.vehicles(id) ON DELETE CASCADE,
-  driver_user_id INT NULL,
+  driver_user_id INT NULL, -- optional FK to your dbo.users.id if you have that table
   driver_name NVARCHAR(255) NULL,
   driver_phone NVARCHAR(64) NULL,
   driver_email NVARCHAR(255) NULL,
-  work_location NVARCHAR(255) NULL,
+  work_location NVARCHAR(255) NULL, -- NEW: VDH location where dispatch originated
   destination NVARCHAR(1024) NULL,
   purpose NVARCHAR(1024) NULL,
   departure_time DATETIME2 NOT NULL,
   return_time DATETIME2 NULL,
   mileage_departure INT NOT NULL,
-  mileage_return INT NOT NULL,
+  mileage_return INT NULL,
   miles_used INT NULL,
-  status NVARCHAR(32) NOT NULL DEFAULT 'active',
+  status NVARCHAR(32) NOT NULL DEFAULT 'active', -- active, completed, cancelled
   notes NVARCHAR(MAX) NULL,
   created_at DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
   updated_at DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME()
@@ -53,7 +53,7 @@ CREATE TABLE dbo.service_logs (
   cost DECIMAL(12,2) NULL,
   receipt_file_url NVARCHAR(1024) NULL,
   notes NVARCHAR(MAX) NULL,
-  created_by INT NULL,
+  created_by INT NULL, -- admin user id
   created_at DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME()
 );
 
@@ -61,13 +61,13 @@ CREATE TABLE dbo.service_logs (
 CREATE TABLE dbo.fleet_alerts (
   id INT IDENTITY(1,1) PRIMARY KEY,
   vehicle_id INT NULL REFERENCES dbo.vehicles(id),
-  alert_type NVARCHAR(64) NOT NULL,
+  alert_type NVARCHAR(64) NOT NULL, -- e.g., 'service_due', 'low_usage'
   message NVARCHAR(1024) NOT NULL,
   created_at DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
   is_read BIT NOT NULL DEFAULT 0
 );
 
--- Indexes
+-- Useful indexes for reporting
 CREATE INDEX IX_vehicles_status ON dbo.vehicles(status);
 CREATE INDEX IX_vehicles_miles_until_service ON dbo.vehicles(miles_until_service);
 CREATE INDEX IX_trip_logs_vehicle ON dbo.trip_logs(vehicle_id);
