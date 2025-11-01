@@ -7,6 +7,123 @@ import plotly.graph_objects as go
 from io import BytesIO
 import base64
 
+# --------- Database helpers (paste into helpdesk_app.py) ----------
+import os
+import logging
+
+import pyodbc
+
+
+logger = logging.getLogger(__name__)
+
+@st.cache_resource
+def get_connection_settings():
+    """
+    Return (server, database, username, password, encrypt, trust_cert).
+    Priority:
+      1) st.secrets['database'] (recommended for deployed apps)
+      2) environment variables: DB_SERVER, DB_DATABASE, DB_USERNAME, DB_PASSWORD
+    """
+    try:
+        db_secret = st.secrets["database"]
+        server = db_secret.get("server")
+        database = db_secret.get("database")
+        username = db_secret.get("username")
+        password = db_secret.get("password")
+        encrypt = db_secret.get("encrypt", "yes")
+        trust_cert = db_secret.get("trust_server_certificate", "yes")
+    except Exception:
+        server = os.getenv("DB_SERVER")
+        database = os.getenv("DB_DATABASE") or os.getenv("DB_NAME")
+        username = os.getenv("DB_USERNAME") or os.getenv("DB_USER")
+        password = os.getenv("DB_PASSWORD") or os.getenv("DB_PASS")
+        encrypt = os.getenv("DB_ENCRYPT", "yes")
+        trust_cert = os.getenv("DB_TRUST_SERVER_CERT", "yes")
+
+    return server, database, username, password, encrypt, trust_cert
+
+def _pick_sql_driver():
+    """
+    Return a driver name present on the machine.
+    Prefer ODBC Driver 18, then 17, then any 'SQL Server' fallback.
+    """
+    drivers = [d for d in pyodbc.drivers()]
+    for preferred in ("ODBC Driver 18 for SQL Server", "ODBC Driver 17 for SQL Server", "SQL Server"):
+        if preferred in drivers:
+            return preferred
+    # fallback to the first available driver
+    return drivers[0] if drivers else None
+
+def _build_conn_str(server, database, username, password, encrypt="yes", trust_cert="yes"):
+    driver = _pick_sql_driver()
+    if not driver:
+        raise RuntimeError("No ODBC drivers found: pyodbc.drivers() returned empty list")
+    # Use SQL Auth if username provided, otherwise Trusted Connection
+    if username and password:
+        conn_str = (
+            f"DRIVER={{{driver}}};SERVER={server};DATABASE={database};"
+            f"UID={username};PWD={password};Encrypt={encrypt};TrustServerCertificate={trust_cert};"
+        )
+    else:
+        conn_str = (
+            f"DRIVER={{{driver}}};SERVER={server};DATABASE={database};Trusted_Connection=yes;"
+            f"Encrypt={encrypt};TrustServerCertificate={trust_cert};"
+        )
+    return conn_str
+
+def execute_query(query, params=None, timeout=30):
+    """
+    Execute a read query and return (DataFrame, error_str_or_None).
+    """
+    server, database, username, password, encrypt, trust_cert = get_connection_settings()
+    if not server or not database:
+        return None, "Database server or name not configured (st.secrets or DB_SERVER/DB_DATABASE)"
+    try:
+        conn_str = _build_conn_str(server, database, username, password, encrypt, trust_cert)
+    except Exception as e:
+        logger.exception("Failed to build connection string")
+        return None, f"ODBC driver error: {e}"
+
+    try:
+        # Use pandas to run the query and return a DataFrame
+        with pyodbc.connect(conn_str, timeout=timeout) as conn:
+            if params:
+                df = pd.read_sql(query, conn, params=params)
+            else:
+                df = pd.read_sql(query, conn)
+        return df, None
+    except Exception as e:
+        logger.exception("Query failed")
+        return None, str(e)
+
+def execute_non_query(query, params=None, timeout=30):
+    """
+    Execute INSERT/UPDATE/DELETE and return (success_bool, error_str_or_None).
+    """
+    server, database, username, password, encrypt, trust_cert = get_connection_settings()
+    if not server or not database:
+        return False, "Database server or name not configured (st.secrets or DB_SERVER/DB_DATABASE)"
+    try:
+        conn_str = _build_conn_str(server, database, username, password, encrypt, trust_cert)
+    except Exception as e:
+        logger.exception("Failed to build connection string")
+        return False, f"ODBC driver error: {e}"
+
+    try:
+        with pyodbc.connect(conn_str, timeout=timeout) as conn:
+            cursor = conn.cursor()
+            if params:
+                cursor.execute(query, params)
+            else:
+                cursor.execute(query)
+            conn.commit()
+            cursor.close()
+        return True, None
+    except Exception as e:
+        logger.exception("Non-query execution failed")
+        return False, str(e)
+# --------- end DB helpers ----------
+
 # Page configuration
 st.set_page_config(page_title="VDH Service Center", page_icon="🏥", layout="wide")
 
