@@ -60,17 +60,78 @@ selection = st.sidebar.selectbox("Navigate", menu_options, index=0)
 
 # 4) Fleet selection wiring (place near other selection handlers)
 if selection == "Fleet Management":
+    st.header("Fleet Management — debug mode")
+    st.write("Debug: entering Fleet selection handler")
+
+    # 1) Confirm module is importable
     try:
-        # import lazily to avoid importing if not selected
-        from fleet import ui as fleet_ui
-    except Exception:
-        st.error("Fleet module not found. Ensure fleet/ui.py exists and exports show_fleet_page(conn).")
-    else:
+        import importlib
+        fleet_spec = importlib.util.find_spec("fleet.ui")
+        st.write("fleet.ui module found:", bool(fleet_spec))
+    except Exception as e:
+        st.error("Error checking fleet.ui importability")
+        st.exception(e)
+        fleet_spec = None
+
+    # 2) Lazy import and inspect
+    fleet_ui = None
+    if fleet_spec:
         try:
-            conn = get_db_connection()
-        except Exception:
-            st.error("Unable to connect to database. Check DB_CONN or DB_* env vars and installed ODBC driver.")
-        else:
-            # call the fleet UI; adjust function name if your module differs
+            from fleet import ui as fleet_ui
+            st.write("fleet.ui imported:", fleet_ui is not None)
+            st.write("Attributes on fleet.ui:", [a for a in dir(fleet_ui) if not a.startswith("_")][:30])
+            has_show = hasattr(fleet_ui, "show_fleet_page")
+            st.write("fleet_ui has show_fleet_page():", has_show)
+        except Exception as e:
+            st.error("Import error when importing fleet.ui")
+            st.exception(e)
+            fleet_ui = None
+
+    # 3) DB quick-test (only if DB config present)
+    try:
+        from your_module_where_execute_query_lives import execute_query  # adjust if function name / location differs
+    except Exception:
+        # If your app uses execute_query in top-level, import it from the current module
+        try:
+            execute_query  # noqa: F821
+        except NameError:
+            execute_query = None
+
+    if execute_query:
+        st.write("execute_query is available")
+        try:
+            # small harmless query to validate connection, adjust table name if needed
+            df, err = execute_query("SELECT TOP 1 1 as ok")
+            if err:
+                st.warning("DB test returned error: " + str(err))
+            else:
+                st.success("DB test ok, returned rows: " + str(len(df) if df is not None else 0))
+        except Exception as e:
+            st.error("DB test raised exception")
+            st.exception(e)
+    else:
+        st.info("No execute_query function available for DB test")
+
+    # 4) Call the page function (if present) and surface any exception
+    if fleet_ui and hasattr(fleet_ui, "show_fleet_page"):
+        try:
+            # If your fleet UI expects a connection object rather than calling execute_query itself,
+            # you can pass None for now to test rendering, or create a connection and pass it in.
+            try:
+                conn = None
+                # If your code expects a pyodbc connection, uncomment and adapt:
+                # conn = get_db_connection()   # if you have get_db_connection defined and working
+            except Exception as e:
+                st.warning("Could not create conn object for fleet_ui (continuing with conn=None)")
+                st.exception(e)
+                conn = None
+
             fleet_ui.show_fleet_page(conn)
+            st.success("fleet_ui.show_fleet_page returned without error")
+        except Exception as e:
+            st.error("fleet_ui.show_fleet_page raised an exception")
+            st.exception(e)
+    else:
+        st.info("fleet_ui.show_fleet_page not available; please confirm function name and file path.")
+# --- end debug block ---
 # === END: Add these blocks ===
