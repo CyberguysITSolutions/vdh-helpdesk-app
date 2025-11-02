@@ -1,9 +1,15 @@
 # === START: Add these blocks into helpdesk_app.py ===
 # 1) Top-level imports (add near other imports)
+# Top-level imports (ensure streamlit is imported before any use of `st`)
+import streamlit as st
+import pandas as pd
+from datetime import datetime, timedelta
 import os
+import logging
 import logging
 import pyodbc
 logger = logging.getLogger(__name__)
+# other imports...
 
 # 2) DB connection helper (add after imports)
 def get_db_connection():
