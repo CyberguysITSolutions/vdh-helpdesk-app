@@ -1,5 +1,5 @@
-# Run a DB connectivity test with explicit path so the runner finds the test file reliably.
-# Triggers manually (workflow_dispatch) and on push to main so you can re-run after changes.
+# Run a DB connectivity test using secrets. Installs MS ODBC driver & unixodbc on runner,
+# shows pyodbc drivers, then runs test_db_ci.py from repo root.
 on:
   workflow_dispatch:
   push:
@@ -8,6 +8,12 @@ on:
 jobs:
   test-db-connection:
     runs-on: ubuntu-latest
+    env:
+      DB_CONN: ${{ secrets.DB_CONN }}
+      DB_SERVER: ${{ secrets.DB_SERVER }}
+      DB_NAME: ${{ secrets.DB_NAME }}
+      DB_USER: ${{ secrets.DB_USER }}
+      DB_PASS: ${{ secrets.DB_PASS }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -16,22 +22,58 @@ jobs:
         run: |
           echo "GITHUB_WORKSPACE = $GITHUB_WORKSPACE"
           echo "PWD = $(pwd)"
-          echo "List workspace root:"
           ls -la "$GITHUB_WORKSPACE" || true
+
+      - name: Install system prerequisites (ODBC driver + unixodbc)
+        run: |
+          set -euo pipefail
+          sudo apt-get update -y
+          sudo apt-get install -y curl apt-transport-https gnupg ca-certificates lsb-release
+          # Add Microsoft package repo for ODBC driver
+          curl https://packages.microsoft.com/keys/microsoft.asc | sudo apt-key add -
+          curl https://packages.microsoft.com/config/ubuntu/22.04/prod.list | sudo tee /etc/apt/sources.list.d/mssql-release.list
+          sudo apt-get update -y
+          # Accept EULA and install msodbcsql18 and unixodbc-dev
+          sudo ACCEPT_EULA=Y apt-get install -y msodbcsql18 unixodbc-dev unixodbc
+          # Show installed odbcinst info
+          odbcinst -j || true
 
       - name: Set up Python 3.11
         uses: actions/setup-python@v4
         with:
           python-version: '3.11'
 
-      - name: Install requirements (if any)
+      - name: Install Python requirements
         run: |
           python -m pip install --upgrade pip
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          # Ensure pyodbc present in case not in requirements
+          python -m pip install pyodbc || true
+
+      - name: Show pyodbc drivers (sanity)
+        run: |
+          python - <<'PY'
+import pyodbc, sys, traceback
+try:
+    print("pyodbc.drivers() ->", pyodbc.drivers())
+except Exception:
+    traceback.print_exc()
+    sys.exit(1)
+PY
 
       - name: Run DB connectivity test (explicit path)
         shell: bash
         run: |
-          echo "Running db connectivity test from repo root"
-          # Use the repo-root relative path explicitly so lookup is deterministic
+          if [ -z "${DB_CONN}${DB_SERVER}${DB_NAME}" ]; then
+            echo "DB_SERVER or DB_DATABASE not set. Please set DB_CONN or DB_* secrets in repository Settings → Secrets and variables → Actions"
+            exit 3
+          fi
+
+          if [ -n "${DB_CONN}" ]; then
+            export CONNECTION_STR="${DB_CONN}"
+          else
+            export CONNECTION_STR="DRIVER={ODBC Driver 18 for SQL Server};SERVER=${DB_SERVER};DATABASE=${DB_NAME};UID=${DB_USER};PWD=${DB_PASS};Encrypt=no"
+          fi
+
+          echo "Using connection string (hidden): [redacted]"
           python ./test_db_ci.py
