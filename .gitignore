@@ -2,3 +2,7 @@
 venv/
 .env
 .env.local
+.venv/
+venv/
+.env
+.env.local
