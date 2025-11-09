@@ -1,137 +1,71 @@
-# === START: Add these blocks into helpdesk_app.py ===
-# 1) Top-level imports (add near other imports)
-# Top-level imports (ensure streamlit is imported before any use of `st`)
+"""
+Main entry for VDH HelpDesk + Fleet integration.
+
+This wrapper exposes a sidebar navigation that lets you switch between:
+- the existing Helpdesk UI (if present),
+- and the Fleet Management UI implemented under fleet/.
+
+It detects the existing helpdesk module safely (ImportError fallback).
+"""
 import streamlit as st
-import pandas as pd
-from datetime import datetime, timedelta
-import os
-import logging
-import logging
-import pyodbc
-logger = logging.getLogger(__name__)
-# other imports...
 
-# 2) DB connection helper (add after imports)
-def get_db_connection():
-    """
-    Returns a pyodbc.Connection. Priority:
-      1) Use full connection string from DB_CONN env var
-      2) Build DSN-less connection from DB_DRIVER/DB_SERVER/DB_NAME/DB_USER/DB_PASS
-    Set DB_CONN locally or in App Settings for deployments.
-    """
-    conn_str = os.getenv("DB_CONN")
-    if conn_str:
-        try:
-            return pyodbc.connect(conn_str, autocommit=True)
-        except Exception:
-            logger.exception("DB_CONN connect failed, falling back to built string")
-
-    driver = os.getenv("DB_DRIVER", "ODBC Driver 18 for SQL Server")
-    server = os.getenv("DB_SERVER", "localhost")
-    database = os.getenv("DB_NAME", "mydb")
-    user = os.getenv("DB_USER")
-    password = os.getenv("DB_PASS")
-
-    if user and password:
-        conn_str = f"DRIVER={{{driver}}};SERVER={server};DATABASE={database};UID={user};PWD={password};Encrypt=no"
-    else:
-        conn_str = f"DRIVER={{{driver}}};SERVER={server};DATABASE={database};Trusted_Connection=yes;Encrypt=no"
-
+# Try to import existing helpdesk page (if the project provides a helpdesk module)
+try:
+    # If your helpdesk UI is a function or module, adapt the import below.
+    # Common patterns:
+    #  - from helpdesk import run as helpdesk_run
+    #  - from helpdesk import helpdesk_page
+    # If none exists, the fallback helpdesk_main() below will display a placeholder.
+    from helpdesk import helpdesk_page as helpdesk_main  # try canonical import
+except Exception:
     try:
-        return pyodbc.connect(conn_str, autocommit=True)
+        from helpdesk_app_core import main as helpdesk_main  # alternate name if present
     except Exception:
-        logger.exception("Failed to connect to DB using built connection string")
-        raise
+        def helpdesk_main():
+            st.header("VDH Helpdesk")
+            st.info("Helpdesk UI is not available (placeholder).")
+            st.markdown(
+                "If you have an existing helpdesk module, export a function named "
+                "`helpdesk_page` or `main` and update the import at the top of this file."
+            )
 
-# 3) Sidebar menu (replace or merge with existing menu creation)
-menu_options = [
-    "Dashboard",
-    "Tickets",
-    "Assets",
-    "Procurement",
-    "Reports",
-    "Users",
-    "Fleet Management",     # <-- NEW
-    "Query Builder",
-    "Connection Test"
-]
+# Import fleet UI from the existing fleet package. This package already exists in the repo
+# (fleet/fleet_ui.py). The function used here is fleet_page().
+from fleet import fleet_ui
 
-selection = st.sidebar.selectbox("Navigate", menu_options, index=0)
+def app_config():
+    st.set_page_config(page_title="VDH Helpdesk + Fleet", layout="wide")
 
-# 4) Fleet selection wiring (place near other selection handlers)
-if selection == "Fleet Management":
-    st.header("Fleet Management — debug mode")
-    st.write("Debug: entering Fleet selection handler")
+def main():
+    app_config()
+    st.sidebar.title("VDH App")
+    st.sidebar.markdown("Navigation")
+    page = st.sidebar.radio("Go to", ["Helpdesk", "Fleet Management", "Admin / Tools"])
 
-    # 1) Confirm module is importable
-    try:
-        import importlib
-        fleet_spec = importlib.util.find_spec("fleet.ui")
-        st.write("fleet.ui module found:", bool(fleet_spec))
-    except Exception as e:
-        st.error("Error checking fleet.ui importability")
-        st.exception(e)
-        fleet_spec = None
+    # Optional debug toggle
+    debug = st.sidebar.checkbox("Debug logging", value=False)
+    if debug:
+        st.sidebar.caption("Debug mode ON")
 
-    # 2) Lazy import and inspect
-    fleet_ui = None
-    if fleet_spec:
+    if page == "Helpdesk":
+        # Call the detected helpdesk entrypoint
         try:
-            from fleet import ui as fleet_ui
-            st.write("fleet.ui imported:", fleet_ui is not None)
-            st.write("Attributes on fleet.ui:", [a for a in dir(fleet_ui) if not a.startswith("_")][:30])
-            has_show = hasattr(fleet_ui, "show_fleet_page")
-            st.write("fleet_ui has show_fleet_page():", has_show)
+            helpdesk_main()
         except Exception as e:
-            st.error("Import error when importing fleet.ui")
-            st.exception(e)
-            fleet_ui = None
-
-    # 3) DB quick-test (only if DB config present)
-    try:
-        from your_module_where_execute_query_lives import execute_query  # adjust if function name / location differs
-    except Exception:
-        # If your app uses execute_query in top-level, import it from the current module
+            st.error(f"Helpdesk UI failed to load: {e}")
+    elif page == "Fleet Management":
+        # fleet_page() is implemented in fleet/fleet_ui.py and uses st.secrets["database"]
         try:
-            execute_query  # noqa: F821
-        except NameError:
-            execute_query = None
-
-    if execute_query:
-        st.write("execute_query is available")
-        try:
-            # small harmless query to validate connection, adjust table name if needed
-            df, err = execute_query("SELECT TOP 1 1 as ok")
-            if err:
-                st.warning("DB test returned error: " + str(err))
-            else:
-                st.success("DB test ok, returned rows: " + str(len(df) if df is not None else 0))
+            fleet_ui.fleet_page()
         except Exception as e:
-            st.error("DB test raised exception")
+            st.error(f"Fleet UI failed to load: {e}")
             st.exception(e)
     else:
-        st.info("No execute_query function available for DB test")
+        st.header("Admin / Tools")
+        st.markdown("Useful admin tasks for operators and developers:")
+        st.write("- Verify DB connection: try `from fleet import fleet_db; fleet_db.fetch_vehicles()` in a console")
+        st.write("- Confirm `st.secrets['database']` is configured in Streamlit Cloud")
+        st.write("- Run DB migrations on staging before production")
 
-    # 4) Call the page function (if present) and surface any exception
-    if fleet_ui and hasattr(fleet_ui, "show_fleet_page"):
-        try:
-            # If your fleet UI expects a connection object rather than calling execute_query itself,
-            # you can pass None for now to test rendering, or create a connection and pass it in.
-            try:
-                conn = None
-                # If your code expects a pyodbc connection, uncomment and adapt:
-                # conn = get_db_connection()   # if you have get_db_connection defined and working
-            except Exception as e:
-                st.warning("Could not create conn object for fleet_ui (continuing with conn=None)")
-                st.exception(e)
-                conn = None
-
-            fleet_ui.show_fleet_page(conn)
-            st.success("fleet_ui.show_fleet_page returned without error")
-        except Exception as e:
-            st.error("fleet_ui.show_fleet_page raised an exception")
-            st.exception(e)
-    else:
-        st.info("fleet_ui.show_fleet_page not available; please confirm function name and file path.")
-# --- end debug block ---
-# === END: Add these blocks ===
+if __name__ == "__main__":
+    main()
