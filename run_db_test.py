@@ -1,5 +1,5 @@
 # Quick DB connection + table existence test for fleet/procurement
-# Save this at the repo root and run it from your activated venv.
+# Save at the repo root and run it from your activated venv.
 import traceback
 from fleet import fleet_db
 
@@ -7,9 +7,9 @@ def test_conn_and_tables():
     try:
         print("Calling fleet_db.get_conn()...")
         conn = fleet_db.get_conn()
-        print("Connection object:", type(conn))
+        print("Connection object type:", type(conn))
         cur = conn.cursor()
-        # List a few tables to show the DB contents
+        # List up to 20 tables to show DB contents
         cur.execute("""
             SELECT TOP (20) TABLE_SCHEMA, TABLE_NAME
             FROM INFORMATION_SCHEMA.TABLES
