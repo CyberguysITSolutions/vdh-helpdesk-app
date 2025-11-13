@@ -8,3 +8,4 @@ venv/
 .env.local
 .streamlit/secrets.toml
 .venv311\ 
+.venv311\ 
