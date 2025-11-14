@@ -708,7 +708,7 @@ elif page == "📊 Dashboard":
                     hovertemplate='<b>%{label}</b><br>Count: %{value}<br>Percentage: %{percent}<extra></extra>'
                 )
                 fig.update_layout(height=350, showlegend=True)
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, width='stretch')
             else:
                 st.info("No status data available")
 
@@ -735,7 +735,7 @@ elif page == "📊 Dashboard":
                 )
                 fig.update_traces(hovertemplate='<b>%{y}</b><br>Tickets: %{x}<extra></extra>')
                 fig.update_layout(height=350, showlegend=False, xaxis_title="Number of Tickets", yaxis_title="Location")
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, width='stretch')
             else:
                 st.info("No location data available")
 
@@ -763,7 +763,7 @@ elif page == "📊 Dashboard":
                 )
                 fig.update_traces(hovertemplate='<b>%{x}</b><br>Count: %{y}<extra></extra>')
                 fig.update_layout(height=350, showlegend=False, xaxis_title="Priority Level", yaxis_title="Count")
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, width='stretch')
             else:
                 st.info("No priority data available")
 
@@ -790,7 +790,7 @@ elif page == "📊 Dashboard":
                 )
                 fig.update_traces(hovertemplate='<b>%{y}</b><br>Assets: %{x}<extra></extra>')
                 fig.update_layout(height=350, showlegend=False, xaxis_title="Number of Assets", yaxis_title="Location")
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, width='stretch')
             else:
                 st.info("No asset location data available")
 
@@ -814,7 +814,7 @@ elif page == "📊 Dashboard":
                 fig.update_traces(textposition='inside', textinfo='percent+label',
                                   hovertemplate='<b>%{label}</b><br>Count: %{value}<br>Percentage: %{percent}<extra></extra>')
                 fig.update_layout(height=350, showlegend=True)
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, width='stretch')
             else:
                 st.info("No asset status data available")
 
@@ -831,7 +831,7 @@ elif page == "📊 Dashboard":
                 )
                 fig.update_traces(hovertemplate='<b>%{x}</b><br>Count: %{y}<extra></extra>')
                 fig.update_layout(height=350, showlegend=False, xaxis_title="Asset Type", yaxis_title="Count")
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, width='stretch')
             else:
                 st.info("No asset type data available")
 
