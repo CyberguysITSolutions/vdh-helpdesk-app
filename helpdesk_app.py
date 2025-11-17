@@ -23,6 +23,48 @@ import traceback
 # Page configuration
 st.set_page_config(page_title="VDH Service Center", page_icon="🏥", layout="wide")
 
+# ========================================================================
+# ROUTER: Handle public form routes via query parameters
+# ========================================================================
+try:
+    # Try newer st.query_params API first
+    query_params = st.query_params
+except AttributeError:
+    # Fallback to older st.experimental_get_query_params()
+    query_params = st.experimental_get_query_params()
+
+# Normalize query params
+page_param = None
+if isinstance(query_params, dict):
+    # Old API returns dict with list values
+    page_param = query_params.get("page", [None])[0] if "page" in query_params else None
+else:
+    # New API has direct attribute access
+    page_param = query_params.get("page", None)
+
+# Route to public forms if page parameter matches a public route
+if page_param:
+    # Normalize the path (remove leading slash if present)
+    page_param = page_param.lstrip('/')
+    
+    # Import public forms module
+    import public_forms
+    
+    # Route to appropriate public form
+    if page_param in ["helpdesk_ticket/submit", "helpdesk_ticket-submit"]:
+        public_forms.render_public_ticket_form()
+        st.stop()
+    elif page_param in ["fleetmanagement/requestavehicle", "fleetmanagement-requestavehicle"]:
+        public_forms.render_public_vehicle_request_form()
+        st.stop()
+    elif page_param in ["procurement/submitrequisition", "procurement-submitrequisition"]:
+        public_forms.render_public_procurement_form()
+        st.stop()
+
+# ========================================================================
+# End Router - Continue with normal app flow
+# ========================================================================
+
 # Try to import pyodbc
 try:
     import pyodbc
@@ -176,6 +218,52 @@ def execute_non_query(query: str, params: Optional[tuple] = None) -> Tuple[bool,
             return False, f"execution error: {e}\n{traceback.format_exc()}"
     except Exception as e:
         return False, f"connection error: {e}\n{traceback.format_exc()}"
+
+
+def insert_and_get_id(query: str, params: Optional[tuple] = None) -> Tuple[Optional[int], Optional[str]]:
+    """
+    Execute an INSERT query and return the newly inserted ID.
+    Returns (new_id, None) on success, or (None, error_message) on failure.
+    """
+    try:
+        from fleet import fleet_db
+    except Exception as e:
+        return None, f"fleet_db import error: {e}"
+
+    try:
+        conn = fleet_db.get_conn()
+        cursor = conn.cursor()
+        try:
+            if params:
+                cursor.execute(query, params)
+            else:
+                cursor.execute(query)
+            
+            # Get the last inserted ID
+            cursor.execute("SELECT @@IDENTITY AS id")
+            row = cursor.fetchone()
+            new_id = int(row[0]) if row and row[0] else None
+            
+            conn.commit()
+            cursor.close()
+            conn.close()
+            return new_id, None
+        except Exception as e:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            try:
+                cursor.close()
+            except Exception:
+                pass
+            try:
+                conn.close()
+            except Exception:
+                pass
+            return None, f"execution error: {e}\n{traceback.format_exc()}"
+    except Exception as e:
+        return None, f"connection error: {e}\n{traceback.format_exc()}"
 # --- end replacement ---
 
 
@@ -466,6 +554,69 @@ else:
     ]
 
 page = st.sidebar.selectbox("Navigate", NAV_ITEMS)
+
+# Add deep-link buttons for public forms in sidebar
+with st.sidebar:
+    st.markdown("---")
+    st.markdown("### 🔗 Public Access Forms")
+    st.markdown("Open these forms in a new tab to share with users:")
+    
+    # Get the current origin for building absolute URLs
+    # Use window.location.origin in JavaScript to construct URLs
+    st.markdown("""
+    <style>
+    .deeplink-btn {
+        display: inline-block;
+        width: 100%;
+        padding: 8px 16px;
+        margin: 4px 0;
+        background-color: #FF6B35;
+        color: white !important;
+        text-decoration: none;
+        border-radius: 4px;
+        text-align: center;
+        font-weight: 500;
+        transition: background-color 0.3s;
+    }
+    .deeplink-btn:hover {
+        background-color: #e55a2b;
+        color: white !important;
+        text-decoration: none;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+    
+    # JavaScript to handle the button clicks and open in new tabs with proper URLs
+    st.markdown("""
+    <script>
+    function openPublicForm(route) {
+        const origin = window.location.origin;
+        const pathname = window.location.pathname;
+        const newUrl = origin + pathname + '?page=' + route;
+        window.open(newUrl, '_blank');
+    }
+    </script>
+    """, unsafe_allow_html=True)
+    
+    # Button links
+    st.markdown("""
+    <a href="?page=helpdesk_ticket/submit" target="_blank" class="deeplink-btn">
+        🎫 Open Helpdesk Ticket Form
+    </a>
+    """, unsafe_allow_html=True)
+    
+    st.markdown("""
+    <a href="?page=fleetmanagement/requestavehicle" target="_blank" class="deeplink-btn">
+        🚗 Open Vehicle Request Form
+    </a>
+    """, unsafe_allow_html=True)
+    
+    st.markdown("""
+    <a href="?page=procurement/submitrequisition" target="_blank" class="deeplink-btn">
+        🛒 Open Procurement Request Form
+    </a>
+    """, unsafe_allow_html=True)
+
 # --- END ROLE-BASED NAVIGATION SNIPPET ------------------------------------
 
 # Header with VDH Logo
@@ -487,103 +638,16 @@ st.markdown("---")
 # -----------------------
 
 if page == "📝 Submit Ticket":
-    st.header("Submit a Ticket")
-    st.markdown("Use this form to request help. Your submission will be created as a draft for admin review.")
-    with st.form("public_ticket_form"):
-        name = st.text_input("Your name", help="First and last name")
-        email = st.text_input("Your email", help="We will use this to send a confirmation")
-        phone = st.text_input("Phone (optional)")
-        location = st.text_input("Location (optional)")
-        priority = st.selectbox("Priority", ["low", "medium", "high", "urgent"])
-        short_desc = st.text_input("Short description")
-        description = st.text_area("Full description")
-        submit = st.form_submit_button("Submit Ticket")
-
-    if submit:
-        if not name or not email or not short_desc:
-            st.error("Name, email and short description are required.")
-        else:
-            public_token = str(uuid.uuid4())[:8]
-            insert_q = """
-                INSERT INTO dbo.Tickets
-                (status, priority, name, email, location, phone_number, short_description, description, created_at)
-                VALUES ('draft', ?, ?, ?, ?, ?, ?, ?, GETDATE())
-            """
-            params = (priority, name, email, location or None, phone or None, short_desc, description or None)
-            ok, err = execute_non_query(insert_q, params)
-            if ok:
-                st.success("Ticket submitted. Reference token: " + public_token)
-                st.info("Admins will review and follow up if you provided contact details.")
-            else:
-                st.error(f"Submission failed: {err}")
+    import public_forms
+    public_forms.render_public_ticket_form()
 
 elif page == "📝 Submit Procurement Request":
-    st.header("Submit a Procurement Request")
-    st.markdown("Submitters: provide request details. A procurement draft will be created for procurement team review.")
-    with st.form("public_procurement_form"):
-        requester_name = st.text_input("Your name", help="Requester")
-        requester_email = st.text_input("Your email")
-        location = st.text_input("Location")
-        department = st.text_input("Department")
-        justification = st.text_area("Justification for request", help="Why you need this item")
-        # Simple line item entry as one item for public submission
-        item_description = st.text_input("Item description (one line)")
-        quantity = st.number_input("Quantity", min_value=1, value=1)
-        unit_price = st.number_input("Estimated unit price", min_value=0.0, value=0.0, format="%.2f")
-        submit_p = st.form_submit_button("Submit Procurement Request")
-    if submit_p:
-        if not requester_name or not requester_email or not justification or not item_description:
-            st.error("Name, email, justification and at least one item description are required.")
-        else:
-            public_token = str(uuid.uuid4())[:8]
-            req_number = f"PR-{datetime.now().strftime('%Y%m%d')}-{public_token}"
-            total = float(unit_price) * int(quantity)
-            items_payload = [{"line_number": 1, "item_description": item_description, "quantity": int(quantity), "unit_price": float(unit_price), "total_price": total}]
-            attachments_json = json.dumps(items_payload)
-            insert_q = """
-                INSERT INTO dbo.Procurement_Requests
-                (request_number, requester_name, requester_email, location, department, justification, total_amount, status, priority, created_at, attachments)
-                VALUES (?, ?, ?, ?, ?, ?, ?, 'draft', 'normal', GETDATE(), ?)
-            """
-            params = (req_number, requester_name, requester_email, location or None, department or None, justification, total, attachments_json)
-            ok, err = execute_non_query(insert_q, params)
-            if ok:
-                st.success("Procurement request submitted. Reference: " + req_number)
-                st.info("Procurement team will review the draft.")
-            else:
-                st.error(f"Submission failed: {err}")
+    import public_forms
+    public_forms.render_public_procurement_form()
 
 elif page == "🛫 Request Vehicle":
-    st.header("Vehicle Request")
-    st.markdown("Request a vehicle or trip. This creates a draft trip for the Fleet team to review.")
-    with st.form("public_vehicle_request"):
-        requester_first = st.text_input("First name")
-        requester_last = st.text_input("Last name")
-        requester_email = st.text_input("Email")
-        destination = st.text_input("Destination / Purpose")
-        departure_date = st.date_input("Departure date", value=date.today())
-        return_date = st.date_input("Return date", value=date.today())
-        starting_mileage = st.number_input("Starting mileage (if known)", min_value=0, value=0)
-        submit_v = st.form_submit_button("Submit Vehicle Request")
-    if submit_v:
-        if not requester_first or not requester_last or not requester_email or not destination:
-            st.error("Please fill name, email and destination.")
-        else:
-            public_token = str(uuid.uuid4())[:8]
-            insert_q = """
-                INSERT INTO dbo.Vehicle_Trips
-                (vehicle_id, requester_first, requester_last, requester_email, destination, departure_time, return_time, status, starting_mileage, created_at)
-                VALUES (NULL, ?, ?, ?, ?, ?, ?, 'draft', ?, GETDATE())
-            """
-            dep_ts = departure_date.isoformat()
-            ret_ts = return_date.isoformat()
-            params = (requester_first, requester_last, requester_email, destination, dep_ts, ret_ts, int(starting_mileage))
-            ok, err = execute_non_query(insert_q, params)
-            if ok:
-                st.success("Vehicle request submitted. Reference: " + public_token)
-                st.info("Fleet team will review this draft.")
-            else:
-                st.error(f"Submission failed: {err}")
+    import public_forms
+    public_forms.render_public_vehicle_request_form()
 
 elif page == "🔌 Connection Test":
     st.header("🔌 Connection Test")
@@ -835,7 +899,241 @@ elif page == "📊 Dashboard":
             else:
                 st.info("No asset type data available")
 
-# ... the rest of admin pages continue unchanged (Tickets list, Assets list, Fleet, Procurement, Reports, etc.) ...
+# -----------------------
+# Admin Tickets page with NEW badge and first_response_at tracking
+# -----------------------
+elif page == "🎫 Tickets":
+    st.header("🎫 Tickets Management")
+    
+    # Fetch tickets with highlight for new ones
+    tickets_query = """
+        SELECT 
+            ticket_id, status, priority, name, email, location, 
+            short_description, created_at, first_response_at,
+            CASE 
+                WHEN status = 'New' AND first_response_at IS NULL THEN 1
+                ELSE 0
+            END as is_new
+        FROM dbo.Tickets
+        ORDER BY created_at DESC
+    """
+    tickets_df, error = execute_query(tickets_query)
+    
+    if error:
+        st.error(f"Error loading tickets: {error}")
+    elif tickets_df is not None and len(tickets_df) > 0:
+        st.markdown(f"**Total Tickets:** {len(tickets_df)}")
+        
+        # Display tickets with NEW badges
+        for idx, row in tickets_df.iterrows():
+            is_new = row.get('is_new', 0) == 1
+            
+            with st.expander(
+                f"{'🔴 NEW' if is_new else ''} #{row['ticket_id']} - {row['short_description']} ({row['status']})",
+                expanded=False
+            ):
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.write(f"**Status:** {row['status']}")
+                    st.write(f"**Priority:** {row['priority']}")
+                with col2:
+                    st.write(f"**Name:** {row['name']}")
+                    st.write(f"**Email:** {row['email']}")
+                with col3:
+                    st.write(f"**Location:** {row.get('location', 'N/A')}")
+                    st.write(f"**Created:** {row['created_at']}")
+                
+                # View button that marks as viewed
+                if st.button(f"View Details", key=f"view_{row['ticket_id']}"):
+                    # Mark as viewed by setting first_response_at
+                    if is_new:
+                        update_query = """
+                            UPDATE dbo.Tickets 
+                            SET first_response_at = GETDATE()
+                            WHERE ticket_id = ?
+                        """
+                        ok, err = execute_non_query(update_query, (row['ticket_id'],))
+                        if ok:
+                            st.success("Ticket marked as viewed")
+                            safe_rerun()
+                        else:
+                            st.error(f"Failed to update: {err}")
+                    else:
+                        st.info("Ticket details would be shown here")
+    else:
+        st.info("No tickets found")
+
+# -----------------------
+# Admin Procurement page with NEW REQUEST badge
+# -----------------------
+elif page == "🛒 Procurement":
+    st.header("🛒 Procurement Requests")
+    
+    # Fetch procurement requests with highlight for new ones
+    proc_query = """
+        SELECT 
+            id, request_number, requester_name, requester_email, 
+            location, department, justification, total_amount, 
+            status, priority, created_at,
+            CASE 
+                WHEN status = 'Requested' THEN 1
+                ELSE 0
+            END as is_new_request
+        FROM dbo.Procurement_Requests
+        ORDER BY created_at DESC
+    """
+    proc_df, error = execute_query(proc_query)
+    
+    if error:
+        st.error(f"Error loading procurement requests: {error}")
+    elif proc_df is not None and len(proc_df) > 0:
+        st.markdown(f"**Total Requests:** {len(proc_df)}")
+        
+        # Display requests with NEW badges
+        for idx, row in proc_df.iterrows():
+            is_new = row.get('is_new_request', 0) == 1
+            
+            with st.expander(
+                f"{'🆕 NEW REQUEST' if is_new else ''} {row['request_number']} - {row['requester_name']} (${row['total_amount']:.2f})",
+                expanded=False
+            ):
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.write(f"**Status:** {row['status']}")
+                    st.write(f"**Priority:** {row['priority']}")
+                    st.write(f"**Requester:** {row['requester_name']}")
+                    st.write(f"**Email:** {row['requester_email']}")
+                with col2:
+                    st.write(f"**Location:** {row.get('location', 'N/A')}")
+                    st.write(f"**Department:** {row.get('department', 'N/A')}")
+                    st.write(f"**Total Amount:** ${row['total_amount']:.2f}")
+                    st.write(f"**Created:** {row['created_at']}")
+                
+                st.write(f"**Justification:** {row.get('justification', 'N/A')}")
+                
+                # Approve/Deny actions for new requests
+                if is_new:
+                    col_a, col_d = st.columns(2)
+                    with col_a:
+                        if st.button(f"✅ Approve", key=f"approve_proc_{row['id']}"):
+                            update_query = """
+                                UPDATE dbo.Procurement_Requests 
+                                SET status = 'Approved', approved_at = GETDATE()
+                                WHERE id = ?
+                            """
+                            ok, err = execute_non_query(update_query, (row['id'],))
+                            if ok:
+                                st.success("Request approved!")
+                                safe_rerun()
+                            else:
+                                st.error(f"Failed to approve: {err}")
+                    with col_d:
+                        if st.button(f"❌ Deny", key=f"deny_proc_{row['id']}"):
+                            update_query = """
+                                UPDATE dbo.Procurement_Requests 
+                                SET status = 'Denied'
+                                WHERE id = ?
+                            """
+                            ok, err = execute_non_query(update_query, (row['id'],))
+                            if ok:
+                                st.success("Request denied")
+                                safe_rerun()
+                            else:
+                                st.error(f"Failed to deny: {err}")
+    else:
+        st.info("No procurement requests found")
+
+# -----------------------
+# Admin Fleet Requests page with Approve/Deny actions
+# -----------------------
+elif page == "🚗 Fleet":
+    st.header("🚗 Fleet Management")
+    
+    # Tab selection for different fleet views
+    fleet_tab = st.radio("View", ["Vehicle Requests", "Active Trips", "All Vehicles"], horizontal=True)
+    
+    if fleet_tab == "Vehicle Requests":
+        st.subheader("Pending Vehicle Requests")
+        
+        # Fetch vehicle requests with status='Requested'
+        requests_query = """
+            SELECT 
+                id, requester_first, requester_last, requester_email, 
+                requester_phone, destination, departure_time, return_time, 
+                starting_mileage, notes, created_at, status
+            FROM dbo.Vehicle_Trips
+            WHERE status = 'Requested'
+            ORDER BY created_at DESC
+        """
+        requests_df, error = execute_query(requests_query)
+        
+        if error:
+            st.error(f"Error loading vehicle requests: {error}")
+        elif requests_df is not None and len(requests_df) > 0:
+            st.markdown(f"**Pending Requests:** {len(requests_df)}")
+            
+            for idx, row in requests_df.iterrows():
+                with st.expander(
+                    f"🆕 Request #{row['id']} - {row['requester_first']} {row['requester_last']} → {row['destination']}",
+                    expanded=True
+                ):
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        st.write(f"**Requester:** {row['requester_first']} {row['requester_last']}")
+                        st.write(f"**Email:** {row['requester_email']}")
+                        st.write(f"**Phone:** {row.get('requester_phone', 'N/A')}")
+                        st.write(f"**Destination:** {row['destination']}")
+                    with col2:
+                        st.write(f"**Departure:** {row['departure_time']}")
+                        st.write(f"**Return:** {row['return_time']}")
+                        st.write(f"**Starting Mileage:** {row.get('starting_mileage', 0)}")
+                        st.write(f"**Created:** {row['created_at']}")
+                    
+                    if row.get('notes'):
+                        st.write(f"**Notes:** {row['notes']}")
+                    
+                    # Approve/Deny buttons
+                    col_a, col_d = st.columns(2)
+                    with col_a:
+                        if st.button(f"✅ Approve Request", key=f"approve_fleet_{row['id']}"):
+                            update_query = """
+                                UPDATE dbo.Vehicle_Trips 
+                                SET status = 'Approved', approved_at = GETDATE()
+                                WHERE id = ?
+                            """
+                            ok, err = execute_non_query(update_query, (row['id'],))
+                            if ok:
+                                st.success("Vehicle request approved! Assign a vehicle to complete.")
+                                safe_rerun()
+                            else:
+                                st.error(f"Failed to approve: {err}")
+                    with col_d:
+                        if st.button(f"❌ Deny Request", key=f"deny_fleet_{row['id']}"):
+                            denial_reason = st.text_input("Denial reason (optional)", key=f"reason_{row['id']}")
+                            if st.button("Confirm Deny", key=f"confirm_deny_{row['id']}"):
+                                update_query = """
+                                    UPDATE dbo.Vehicle_Trips 
+                                    SET status = 'Denied', denial_reason = ?
+                                    WHERE id = ?
+                                """
+                                ok, err = execute_non_query(update_query, (denial_reason or None, row['id']))
+                                if ok:
+                                    st.success("Request denied")
+                                    safe_rerun()
+                                else:
+                                    st.error(f"Failed to deny: {err}")
+        else:
+            st.info("No pending vehicle requests")
+    
+    elif fleet_tab == "Active Trips":
+        st.subheader("Active Vehicle Trips")
+        st.info("Active trips view would show trips currently in progress")
+    
+    else:  # All Vehicles
+        st.subheader("All Vehicles")
+        st.info("Vehicle inventory would be displayed here")
+
+# ... the rest of admin pages continue unchanged (Assets list, Reports, Users, Query Builder, etc.) ...
 # For brevity I preserved the admin page logic above; ensure the rest of your original admin page code
 # follows here (you had it previously in the file). If it's missing, you can paste it after this point.
 
