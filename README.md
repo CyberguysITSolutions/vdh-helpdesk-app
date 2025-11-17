@@ -1,14 +1,30 @@
-# 🎫 IT Help Desk System
+# 🎫 VDH Service Center
 
-A modern, cloud-native help desk application built with Streamlit and Azure SQL Database.
+A modern, cloud-native help desk and service management application built with Streamlit and Azure SQL Database.
 
 ## Features
 
+### Public Access Features
+- 🎫 **Public Ticket Submission** - Users can submit support tickets via direct link
+- 🚗 **Public Vehicle Requests** - Staff can request vehicles for official trips
+- 🛒 **Public Procurement Requests** - Submit procurement requests for approval
+- 🔗 **Deep-Link Sharing** - Easy-to-share URLs for public forms
+
+### Admin Features
 - 📊 **Dashboard** - Real-time ticket metrics and statistics
-- 🎫 **Ticket Management** - View, filter, and manage support tickets
+- 🎫 **Ticket Management** - View, filter, and manage support tickets with NEW badges
+- 🚗 **Fleet Management** - Approve/deny vehicle requests and track fleet usage
+- 🛒 **Procurement Management** - Review and approve/deny procurement requests
+- 💻 **Asset Management** - Track IT assets and equipment
 - 👥 **User Management** - Manage agents and customers
 - 🔍 **Query Builder** - Run custom SQL queries for analytics
 - ⚡ **Real-time Updates** - Connected directly to Azure SQL Database
+
+### Workflow Features
+- ✨ **NEW Badges** - Highlight unviewed tickets and pending requests
+- ✅ **Approval Flows** - One-click approve/deny for requests
+- 📧 **Status Tracking** - Automatic timestamp tracking for responses and approvals
+- 🔄 **Auto-Refresh** - Updates display after workflow actions
 
 ## Tech Stack
 
@@ -21,7 +37,7 @@ A modern, cloud-native help desk application built with Streamlit and Azure SQL 
 ### Prerequisites
 
 - Python 3.11+
-- Azure SQL Database credentials
+- Azure SQL Database credentials (or use MOCK_DATA mode)
 - Git (for deployment)
 
 ### Local Development
@@ -29,7 +45,7 @@ A modern, cloud-native help desk application built with Streamlit and Azure SQL 
 1. Clone the repository:
    ```bash
    git clone <your-repo-url>
-   cd helpdesk-app
+   cd vdh-helpdesk-app
    ```
 
 2. Install dependencies:
@@ -37,21 +53,70 @@ A modern, cloud-native help desk application built with Streamlit and Azure SQL 
    pip install -r requirements.txt
    ```
 
-3. Create `.streamlit/secrets.toml`:
+3. **Option A: Run with MOCK_DATA (No database required)**
+   ```bash
+   export MOCK_DATA=1
+   streamlit run helpdesk_app.py
+   ```
+
+4. **Option B: Run with real database**
+   
+   Create `.streamlit/secrets.toml` or `..streamlit/secrets.toml`:
    ```toml
    [database]
    server = "your-server.database.windows.net"
    database = "helpdesk-db"
    username = "your_username"
    password = "your_password"
+   
+   [admin]
+   password = "your_admin_password"
    ```
-
-4. Run the app:
+   
+   Run the app:
    ```bash
    streamlit run helpdesk_app.py
    ```
 
 5. Open your browser to `http://localhost:8501`
+
+## Public Form Routes
+
+The application supports direct deep-link URLs for public access:
+
+- **Ticket Form**: `http://localhost:8501?page=helpdesk_ticket/submit`
+- **Vehicle Request**: `http://localhost:8501?page=fleetmanagement/requestavehicle`
+- **Procurement Request**: `http://localhost:8501?page=procurement/submitrequisition`
+
+These URLs can be shared with staff to enable direct form submission without logging in.
+
+## Database Migration
+
+If using the admin workflow features (NEW badges, approval tracking), run the optional migration:
+
+```sql
+-- Run this SQL on your Azure SQL Database
+-- File: db/migrations/001_add_workflow_columns.sql
+```
+
+The migration adds optional columns:
+- `dbo.Tickets.first_response_at` - Tracks when admin first views a ticket
+- `dbo.Procurement_Requests.approved_by`, `approved_at` - Track approvals
+- `dbo.Vehicle_Trips.approved_by`, `approved_at`, `denial_reason` - Track vehicle request approvals
+
+**Note:** The app works without these columns, but workflow features will be limited.
+
+## Testing
+
+### Run Tests
+```bash
+# Run automated tests in MOCK_DATA mode
+export MOCK_DATA=1
+python test_public_forms.py
+```
+
+### Manual Testing
+See [IMPLEMENTATION_GUIDE.md](IMPLEMENTATION_GUIDE.md) for comprehensive testing instructions.
 
 ## Deployment
 
