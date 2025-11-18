@@ -1,0 +1,1169 @@
+import streamlit as st
+import pandas as pd
+from datetime import datetime, timedelta
+import os
+import plotly.express as px
+import plotly.graph_objects as go
+from io import BytesIO
+import base64
+from typing import Optional, Tuple
+import traceback
+
+# Page configuration
+st.set_page_config(page_title="VDH Service Center", page_icon="🏥", layout="wide")
+
+# Try to import pyodbc
+try:
+    import pyodbc
+    HAS_PYODBC = True
+except:
+    HAS_PYODBC = False
+
+# Try to import reporting libraries
+try:
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    from openpyxl.utils.dataframe import dataframe_to_rows
+    HAS_EXCEL = True
+except:
+    HAS_EXCEL = False
+
+try:
+    from reportlab.lib.pagesizes import letter, A4
+    from reportlab.lib import colors
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, PageBreak
+    from reportlab.lib.units import inch
+    HAS_PDF = True
+except:
+    HAS_PDF = False
+
+# Database connection
+@st.cache_resource
+def get_connection_string():
+    try:
+        server = st.secrets["database"]["server"]
+        database = st.secrets["database"]["database"]
+        username = st.secrets["database"]["username"]
+        password = st.secrets["database"]["password"]
+    except:
+        server = os.getenv("DB_SERVER")
+        database = os.getenv("DB_DATABASE")
+        username = os.getenv("DB_USERNAME")
+        password = os.getenv("DB_PASSWORD")
+
+    return server, database, username, password
+
+
+# --- REPLACED execute_query / execute_non_query TO USE fleet.fleet_db.get_conn() ---
+def execute_query(query: str, params: Optional[tuple] = None) -> Tuple[Optional[pd.DataFrame], Optional[str]]:
+    """
+    Execute a SELECT query and return (DataFrame, None) on success or (None, error_message).
+    This attempts to use SQLAlchemy + pyodbc (mssql+pyodbc) to avoid pandas/pyodbc DATETIMEOFFSET issues.
+    Falls back to fleet_db.get_conn() + pandas.read_sql if needed.
+    """
+    try:
+        from fleet import fleet_db
+    except Exception as e:
+        return None, f"fleet_db import error: {e}"
+
+    # Try SQLAlchemy path first (preferred)
+    try:
+        # Lazy import
+        try:
+            from sqlalchemy import create_engine
+            from urllib.parse import quote_plus
+        except Exception as imp_e:
+            raise RuntimeError(f"sqlalchemy not available: {imp_e}")
+
+        # Get connection pieces
+        server, database, username, password = get_connection_string()
+        if not all([server, database, username, password]):
+            raise RuntimeError("Missing DB connection pieces for SQLAlchemy engine; falling back to pyodbc path.")
+
+        # If Azure-style username required, append short server
+        if "@" not in username and server:
+            username = f"{username}@{server.split('.')[0]}"
+
+        # Build ODBC connection string and SQLAlchemy URL
+        odbc_str = (
+            f"DRIVER={{ODBC Driver 18 for SQL Server}};"
+            f"SERVER={server};DATABASE={database};"
+            f"UID={username};PWD={password};"
+            f"Encrypt=yes;TrustServerCertificate=yes;Connection Timeout=30;"
+        )
+        conn_url = "mssql+pyodbc:///?odbc_connect=" + quote_plus(odbc_str)
+
+        engine = create_engine(conn_url, connect_args={"timeout": 30})
+        try:
+            if params:
+                df = pd.read_sql_query(query, engine, params=params)
+            else:
+                df = pd.read_sql_query(query, engine)
+            engine.dispose()
+            return df, None
+        except Exception as e_sql:
+            try:
+                engine.dispose()
+            except:
+                pass
+            # Surface the SQLAlchemy error to help debugging, then fall back
+            sqlalchemy_error = e_sql
+            raise RuntimeError(f"SQLAlchemy read_sql_query failed: {e_sql}")
+    except Exception as primary_exc:
+        # Fallback: use existing fleet_db.get_conn() and pandas.read_sql
+        try:
+            conn = fleet_db.get_conn()
+        except Exception as e_conn:
+            return None, f"connection error: {e_conn}\nprimary error: {primary_exc}"
+
+        try:
+            if params:
+                df = pd.read_sql(query, conn, params=params)
+            else:
+                df = pd.read_sql(query, conn)
+            conn.close()
+            return df, None
+        except Exception as e_fetch:
+            try:
+                conn.close()
+            except:
+                pass
+            return None, f"query error (pyodbc read_sql failed): {e_fetch}\nprimary error: {primary_exc}"
+
+
+def execute_non_query(query: str, params: Optional[tuple] = None) -> Tuple[bool, Optional[str]]:
+    """
+    Execute INSERT/UPDATE/DELETE using fleet.fleet_db.get_conn().
+    Returns (True, None) on success, or (False, error_message) on failure.
+    """
+    try:
+        from fleet import fleet_db
+    except Exception as e:
+        return False, f"fleet_db import error: {e}"
+
+    try:
+        conn = fleet_db.get_conn()
+        cursor = conn.cursor()
+        try:
+            if params:
+                cursor.execute(query, params)
+            else:
+                cursor.execute(query)
+            conn.commit()
+            cursor.close()
+            conn.close()
+            return True, None
+        except Exception as e:
+            try:
+                conn.rollback()
+            except:
+                pass
+            try:
+                cursor.close()
+            except:
+                pass
+            try:
+                conn.close()
+            except:
+                pass
+            return False, f"execution error: {e}\n{traceback.format_exc()}"
+    except Exception as e:
+        return False, f"connection error: {e}\n{traceback.format_exc()}"
+# --- end replacement ---
+
+
+# --- safe rerun helper (inserted automatically) -------------------------
+def safe_rerun():
+    """
+    Cross-version safe replacement for st.experimental_rerun()/st.rerun().
+    Call safe_rerun() instead of st.experimental_rerun() or st.rerun().
+    This will attempt to call the Streamlit API when available; otherwise it raises
+    the internal RerunException or falls back to st.stop().
+    """
+    try:
+        # Preferred newer API
+        return st.experimental_rerun()
+    except Exception:
+        try:
+            # Streamlit newer internal location
+            from streamlit.runtime.scriptrunner import RerunException
+            raise RerunException()
+        except Exception:
+            try:
+                # Older Streamlit internal path
+                from streamlit.report_thread import RerunException as _OldRerunException  # type: ignore
+                raise _OldRerunException()
+            except Exception:
+                # Final fallback: stop the script (prevents AttributeError)
+                st.stop()
+# ------------------------------------------------------------------------
+
+
+def generate_excel_report(df, report_title):
+    """Generate Excel report with formatting"""
+    if not HAS_EXCEL:
+        return None, "openpyxl not installed"
+
+    try:
+        output = BytesIO()
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "Report"
+
+        # Add title
+        ws['A1'] = report_title
+        ws['A1'].font = Font(size=16, bold=True)
+        ws['A1'].fill = PatternFill(start_color="002855", end_color="002855", fill_type="solid")
+        ws['A1'].font = Font(size=16, bold=True, color="FFFFFF")
+        ws.merge_cells('A1:' + chr(64 + len(df.columns)) + '1')
+
+        # Add generation timestamp
+        ws['A2'] = f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+        ws['A2'].font = Font(size=10, italic=True)
+        ws.merge_cells('A2:' + chr(64 + len(df.columns)) + '2')
+
+        # Add headers
+        header_row = 4
+        for col_num, column_title in enumerate(df.columns, 1):
+            cell = ws.cell(row=header_row, column=col_num)
+            cell.value = column_title
+            cell.font = Font(bold=True, color="FFFFFF")
+            cell.fill = PatternFill(start_color="0066CC", end_color="0066CC", fill_type="solid")
+            cell.alignment = Alignment(horizontal="center", vertical="center")
+
+        # Add data
+        for row_num, row_data in enumerate(df.values, header_row + 1):
+            for col_num, value in enumerate(row_data, 1):
+                cell = ws.cell(row=row_num, column=col_num)
+                cell.value = value
+                cell.alignment = Alignment(horizontal="left", vertical="center")
+
+                # Alternate row colors
+                if row_num % 2 == 0:
+                    cell.fill = PatternFill(start_color="F2F2F2", end_color="F2F2F2", fill_type="solid")
+
+        # Auto-adjust column widths
+        for col_num in range(1, len(df.columns) + 1):
+            max_length = 0
+            column_letter = chr(64 + col_num)
+
+            # Check header length
+            if col_num <= len(df.columns):
+                max_length = len(str(df.columns[col_num - 1]))
+
+            # Check data lengths
+            for row_num in range(header_row + 1, ws.max_row + 1):
+                cell = ws.cell(row=row_num, column=col_num)
+                try:
+                    if cell.value and len(str(cell.value)) > max_length:
+                        max_length = len(str(cell.value))
+                except:
+                    pass
+
+            adjusted_width = min(max_length + 2, 50)
+            ws.column_dimensions[column_letter].width = adjusted_width
+
+        wb.save(output)
+        output.seek(0)
+        return output, None
+    except Exception as e:
+        return None, str(e)
+
+
+def generate_pdf_report(df, report_title):
+    """Generate PDF report"""
+    if not HAS_PDF:
+        return None, "reportlab not installed"
+
+    try:
+        output = BytesIO()
+        doc = SimpleDocTemplate(output, pagesize=letter, topMargin=0.5*inch, bottomMargin=0.5*inch)
+        elements = []
+        styles = getSampleStyleSheet()
+
+        # Title
+        title_style = ParagraphStyle(
+            'CustomTitle',
+            parent=styles['Heading1'],
+            fontSize=18,
+            textColor=colors.HexColor('#002855'),
+            spaceAfter=12,
+            alignment=1  # Center
+        )
+        elements.append(Paragraph(report_title, title_style))
+        elements.append(Paragraph(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", styles['Normal']))
+        elements.append(Spacer(1, 0.3*inch))
+
+        # Convert dataframe to table data
+        data = [df.columns.tolist()] + df.values.tolist()
+
+        # Create table
+        table = Table(data)
+        table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#0066CC')),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, 0), 10),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+            ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
+            ('GRID', (0, 0), (-1, -1), 1, colors.black),
+            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.lightgrey]),
+        ]))
+
+        elements.append(table)
+        doc.build(elements)
+        output.seek(0)
+        return output, None
+    except Exception as e:
+        return None, str(e)
+
+
+def generate_csv_report(df):
+    """Generate CSV report"""
+    try:
+        output = BytesIO()
+        df.to_csv(output, index=False, encoding='utf-8')
+        output.seek(0)
+        return output, None
+    except Exception as e:
+        return None, str(e)
+
+
+# Custom CSS - VDH Color Scheme
+st.markdown("""
+<style>
+    /* VDH Colors: Navy Blue #002855, Orange #FF6B35 */
+    .metric-card {
+        background: white;
+        padding: 20px;
+        border-radius: 10px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    .stButton>button {
+        width: 100%;
+        background-color: #FF6B35;
+        color: white;
+    }
+    .stButton>button:hover {
+        background-color: #e55a2b;
+        color: white;
+    }
+    div[data-testid="stExpander"] {
+        background-color: #f8f9fa;
+        border-radius: 8px;
+        border: 1px solid #dee2e6;
+    }
+    .ticket-card {
+        background: white;
+        padding: 15px;
+        border-radius: 8px;
+        border-left: 4px solid #FF6B35;
+        margin-bottom: 10px;
+    }
+    .note-card {
+        background: #f8f9fa;
+        padding: 10px;
+        border-radius: 6px;
+        margin: 10px 0;
+        border-left: 3px solid #002855;
+    }
+    /* Header styling */
+    h1, h2, h3 {
+        color: #002855;
+    }
+    /* Sidebar styling */
+    [data-testid="stSidebar"] {
+        background-color: #002855;
+    }
+    [data-testid="stSidebar"] .stSelectbox label {
+        color: white;
+    }
+    /* Metric styling */
+    [data-testid="stMetricValue"] {
+        color: #002855;
+    }
+</style>
+""", unsafe_allow_html=True)
+
+# Initialize session state
+if 'show_add_asset_form' not in st.session_state:
+    st.session_state.show_add_asset_form = False
+if 'show_add_ticket_form' not in st.session_state:
+    st.session_state.show_add_ticket_form = False
+if 'edit_asset_id' not in st.session_state:
+    st.session_state.edit_asset_id = None
+if 'view_ticket_id' not in st.session_state:
+    st.session_state.view_ticket_id = None
+if 'edit_ticket_id' not in st.session_state:
+    st.session_state.edit_ticket_id = None
+if 'report_preview_data' not in st.session_state:
+    st.session_state.report_preview_data = None
+
+# Header with VDH Logo
+col1, col2, col3 = st.columns([1, 4, 1])
+with col1:
+    try:
+        st.image("VDH-logo.png", width=120)
+    except:
+        st.markdown("### 🏥")
+with col2:
+    st.markdown("<h1 style='color: #002855; margin-top: 20px;'>Service Center</h1>", unsafe_allow_html=True)
+with col3:
+    st.markdown("<p style='text-align: right; margin-top: 30px;'><strong>Admin</strong></p>", unsafe_allow_html=True)
+
+st.markdown("---")
+
+# Sidebar navigation
+page = st.sidebar.selectbox("Navigate", [
+    "📊 Dashboard",
+    "🎫 Tickets",
+    "💻 Assets",
+    "🚗 Fleet",
+    "🛒 Procurement",
+    "📈 Reports",
+    "👥 Users",
+    "🔍 Query Builder",
+    "🔌 Connection Test"
+])
+
+if page == "📊 Dashboard":
+    st.header("📊 Dashboard Overview")
+
+    # Fetch data
+    with st.spinner("Loading dashboard data..."):
+        # Get ticket statistics
+        ticket_stats_query = """
+            SELECT
+                COUNT(*) as total_tickets,
+                SUM(CASE WHEN status = 'open' THEN 1 ELSE 0 END) as open_tickets,
+                SUM(CASE WHEN status = 'in_progress' THEN 1 ELSE 0 END) as in_progress_tickets,
+                SUM(CASE WHEN status = 'on_hold' THEN 1 ELSE 0 END) as on_hold_tickets,
+                SUM(CASE WHEN status = 'waiting_customer_response' THEN 1 ELSE 0 END) as waiting_tickets,
+                SUM(CASE WHEN status = 'resolved' THEN 1 ELSE 0 END) as resolved_tickets,
+                SUM(CASE WHEN priority = 'urgent' THEN 1 ELSE 0 END) as urgent_tickets
+            FROM dbo.Tickets
+        """
+        stats_df, error = execute_query(ticket_stats_query)
+
+        # Get asset statistics
+        asset_stats_query = """
+            SELECT
+                COUNT(*) as total_assets,
+                SUM(CASE WHEN status = 'Deployed' THEN 1 ELSE 0 END) as deployed_assets,
+                SUM(CASE WHEN status = 'In-Stock' THEN 1 ELSE 0 END) as available_assets,
+                SUM(CASE WHEN status = 'Repair' THEN 1 ELSE 0 END) as repair_assets
+            FROM dbo.Assets
+        """
+        asset_stats_df, asset_error = execute_query(asset_stats_query)
+
+        if not error and stats_df is not None:
+            stats = stats_df.iloc[0]
+
+            # Top metrics row - Tickets
+            st.subheader("🎫 Ticket Overview")
+            col1, col2, col3, col4 = st.columns(4)
+
+            with col1:
+                st.metric(label="📋 Total Tickets", value=int(stats['total_tickets']))
+            with col2:
+                st.metric(label="🟢 Open", value=int(stats['open_tickets']), delta_color="inverse")
+            with col3:
+                st.metric(label="🔄 In Progress", value=int(stats['in_progress_tickets']))
+            with col4:
+                st.metric(label="🚨 Urgent", value=int(stats['urgent_tickets']), delta_color="inverse")
+
+        # Asset metrics row
+        if not asset_error and asset_stats_df is not None:
+            asset_stats = asset_stats_df.iloc[0]
+
+            st.markdown("---")
+            st.subheader("💻 Asset Overview")
+            col1, col2, col3, col4 = st.columns(4)
+
+            with col1:
+                st.metric(label="💼 Total Assets", value=int(asset_stats['total_assets']))
+            with col2:
+                st.metric(label="✅ Deployed", value=int(asset_stats['deployed_assets']))
+            with col3:
+                st.metric(label="📦 In Stock", value=int(asset_stats['available_assets']))
+            with col4:
+                st.metric(label="🔧 In Repair", value=int(asset_stats['repair_assets']), delta_color="inverse")
+
+        st.markdown("---")
+
+        # Charts Row 1 - Tickets by Status and Location
+        col1, col2 = st.columns(2)
+
+        with col1:
+            st.subheader("📊 Tickets by Status")
+            status_query = """
+                SELECT
+                    CASE status
+                        WHEN 'waiting_customer_response' THEN 'Waiting Customer'
+                        WHEN 'on_hold' THEN 'On Hold'
+                        WHEN 'in_progress' THEN 'In Progress'
+                        ELSE UPPER(LEFT(status, 1)) + LOWER(SUBSTRING(status, 2, LEN(status)))
+                    END as status_display,
+                    COUNT(*) as count
+                FROM dbo.Tickets
+                GROUP BY status
+                ORDER BY count DESC
+            """
+            status_df, error = execute_query(status_query)
+
+            if not error and status_df is not None and len(status_df) > 0:
+                # VDH color scheme for status
+                status_colors = {
+                    'Open': '#FF6B35',
+                    'In Progress': '#002855',
+                    'On Hold': '#FFC107',
+                    'Waiting Customer': '#17A2B8',
+                    'Resolved': '#28A745',
+                    'Closed': '#6C757D'
+                }
+
+                fig = px.pie(
+                    status_df,
+                    values='count',
+                    names='status_display',
+                    color='status_display',
+                    color_discrete_map=status_colors,
+                    hover_data=['count']
+                )
+                fig.update_traces(
+                    textposition='inside',
+                    textinfo='percent+label',
+                    hovertemplate='<b>%{label}</b><br>Count: %{value}<br>Percentage: %{percent}<extra></extra>'
+                )
+                fig.update_layout(height=350, showlegend=True)
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.info("No status data available")
+
+        with col2:
+            st.subheader("📍 Tickets by Location")
+            location_query = """
+                SELECT location, COUNT(*) as count
+                FROM dbo.Tickets
+                WHERE location IS NOT NULL
+                GROUP BY location
+                ORDER BY count DESC
+            """
+            location_df, error = execute_query(location_query)
+
+            if not error and location_df is not None and len(location_df) > 0:
+                fig = px.bar(
+                    location_df,
+                    x='count',
+                    y='location',
+                    orientation='h',
+                    color='count',
+                    color_continuous_scale=[[0, '#FF6B35'], [0.5, '#002855'], [1, '#001a33']],
+                    hover_data={'count': True, 'location': False}
+                )
+                fig.update_traces(
+                    hovertemplate='<b>%{y}</b><br>Tickets: %{x}<extra></extra>'
+                )
+                fig.update_layout(
+                    height=350,
+                    showlegend=False,
+                    xaxis_title="Number of Tickets",
+                    yaxis_title="Location",
+                    coloraxis_showscale=False
+                )
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.info("No location data available")
+
+        # Charts Row 2 - Priority and Assets
+        col1, col2 = st.columns(2)
+
+        with col1:
+            st.subheader("🎯 Tickets by Priority")
+            priority_query = """
+                SELECT priority, COUNT(*) as count FROM dbo.Tickets
+                GROUP BY priority
+                ORDER BY CASE priority WHEN 'urgent' THEN 1 WHEN 'high' THEN 2 WHEN 'medium' THEN 3 WHEN 'low' THEN 4 END
+            """
+            priority_df, error = execute_query(priority_query)
+
+            if not error and priority_df is not None and len(priority_df) > 0:
+                # VDH colors for priority
+                priority_colors_map = {
+                    'urgent': '#DC3545',
+                    'high': '#FF6B35',
+                    'medium': '#FFC107',
+                    'low': '#28A745'
+                }
+                fig = px.bar(
+                    priority_df,
+                    x='priority',
+                    y='count',
+                    color='priority',
+                    color_discrete_map=priority_colors_map,
+                    hover_data={'priority': False, 'count': True}
+                )
+                fig.update_traces(
+                    hovertemplate='<b>%{x}</b><br>Count: %{y}<extra></extra>'
+                )
+                fig.update_layout(
+                    height=350,
+                    showlegend=False,
+                    xaxis_title="Priority Level",
+                    yaxis_title="Count"
+                )
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.info("No priority data available")
+
+        with col2:
+            st.subheader("📦 Assets by Location")
+            asset_location_query = """
+                SELECT location, COUNT(*) as count
+                FROM dbo.Assets
+                WHERE location IS NOT NULL
+                GROUP BY location
+                ORDER BY count DESC
+            """
+            asset_location_df, error = execute_query(asset_location_query)
+
+            if not error and asset_location_df is not None and len(asset_location_df) > 0:
+                fig = px.bar(
+                    asset_location_df,
+                    x='count',
+                    y='location',
+                    orientation='h',
+                    color='count',
+                    color_continuous_scale=[[0, '#FF6B35'], [0.5, '#002855'], [1, '#001a33']],
+                    hover_data={'count': True, 'location': False}
+                )
+                fig.update_traces(
+                    hovertemplate='<b>%{y}</b><br>Assets: %{x}<extra></extra>'
+                )
+                fig.update_layout(
+                    height=350,
+                    showlegend=False,
+                    xaxis_title="Number of Assets",
+                    yaxis_title="Location",
+                    coloraxis_showscale=False
+                )
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.info("No asset location data available")
+
+        # Charts Row 3 - Asset Status and Type
+        col1, col2 = st.columns(2)
+
+        with col1:
+            st.subheader("💻 Assets by Status")
+            asset_status_query = "SELECT status, COUNT(*) as count FROM dbo.Assets GROUP BY status"
+            asset_status_df, error = execute_query(asset_status_query)
+
+            if not error and asset_status_df is not None and len(asset_status_df) > 0:
+                # VDH colors for asset status
+                asset_status_colors = {
+                    'Deployed': '#002855',
+                    'In-Stock': '#28A745',
+                    'Surplus': '#6C757D',
+                    'Repair': '#FF6B35',
+                    'Retired': '#343A40',
+                    'Unaccounted': '#DC3545'
+                }
+                fig = px.pie(
+                    asset_status_df,
+                    values='count',
+                    names='status',
+                    color='status',
+                    color_discrete_map=asset_status_colors,
+                    hover_data=['count']
+                )
+                fig.update_traces(
+                    textposition='inside',
+                    textinfo='percent+label',
+                    hovertemplate='<b>%{label}</b><br>Count: %{value}<br>Percentage: %{percent}<extra></extra>'
+                )
+                fig.update_layout(height=350, showlegend=True)
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.info("No asset status data available")
+
+        with col2:
+            st.subheader("📦 Assets by Type")
+            asset_type_query = "SELECT type, COUNT(*) as count FROM dbo.Assets GROUP BY type ORDER BY count DESC"
+            asset_type_df, error = execute_query(asset_type_query)
+
+            if not error and asset_type_df is not None and len(asset_type_df) > 0:
+                fig = px.bar(
+                    asset_type_df,
+                    x='type',
+                    y='count',
+                    color='count',
+                    color_continuous_scale=[[0, '#FF6B35'], [0.5, '#002855'], [1, '#001a33']],
+                    hover_data={'type': False, 'count': True}
+                )
+                fig.update_traces(
+                    hovertemplate='<b>%{x}</b><br>Count: %{y}<extra></extra>'
+                )
+                fig.update_layout(
+                    height=350,
+                    showlegend=False,
+                    xaxis_title="Asset Type",
+                    yaxis_title="Count",
+                    coloraxis_showscale=False
+                )
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.info("No asset type data available")
+
+
+# ======= Fleet Management Page (enhanced with active trip details) =======
+elif page == "🚗 Fleet":
+    st.header("🚗 Fleet Management")
+
+    # Top: optional quick stats
+    col1, col2, col3 = st.columns(3)
+    total_q, _ = execute_query("SELECT COUNT(1) as c FROM dbo.vehicles")
+    inuse_q, _ = execute_query("SELECT COUNT(1) as c FROM dbo.vehicles WHERE status = 'In Use'")
+    avail_q, _ = execute_query("SELECT COUNT(1) as c FROM dbo.vehicles WHERE status = 'Available'")
+    with col1:
+        st.metric("Total vehicles", int(total_q.iloc[0]['c']) if total_q is not None else 0)
+    with col2:
+        st.metric("In Use", int(inuse_q.iloc[0]['c']) if inuse_q is not None else 0)
+    with col3:
+        st.metric("Available", int(avail_q.iloc[0]['c']) if avail_q is not None else 0)
+
+    st.markdown("---")
+
+    # If user clicked to view a trip, show trip detail panel
+    if 'view_trip_id' not in st.session_state:
+        st.session_state.view_trip_id = None
+
+    if st.session_state.view_trip_id:
+        trip_id = st.session_state.view_trip_id
+        st.subheader(f"Trip Details — #{trip_id}")
+        # Convert DATETIMEOFFSET columns to ISO strings to avoid pyodbc DATETIMEOFFSET issues
+        trip_q = """
+            SELECT t.*, v.make_model, v.license_plate, v.photo_url, v.picture_url,
+                   CONVERT(VARCHAR(33), t.departure_time, 127) AS departure_time_iso,
+                   CONVERT(VARCHAR(33), t.return_time, 127) AS return_time_iso
+            FROM dbo.Vehicle_Trips t
+            LEFT JOIN dbo.vehicles v ON v.id = t.vehicle_id
+            WHERE t.trip_id = ?
+        """
+        trip_df, trip_err = execute_query(trip_q, (trip_id,))
+        if trip_err or trip_df is None or len(trip_df) == 0:
+            st.error("Trip not found or error loading trip")
+            st.session_state.view_trip_id = None
+        else:
+            trip = trip_df.iloc[0]
+            col1, col2 = st.columns([3, 1])
+            with col1:
+                st.markdown(f"**Vehicle:** {trip.get('make_model')} — Plate: {trip.get('license_plate')}")
+                st.markdown(f"**Requester:** {trip.get('requester_first')} {trip.get('requester_last')} ({trip.get('requester_email')})")
+                st.markdown(f"**Status:** {trip.get('status')}")
+                st.markdown(f"**Starting mileage:** {trip.get('starting_mileage')}")
+                st.markdown(f"**Returning mileage:** {trip.get('returning_mileage') if trip.get('returning_mileage') else '—'}")
+                st.markdown(f"**Destination:** {trip.get('destination') or '—'}")
+                st.markdown(f"**Departure:** {trip.get('departure_time_iso') if trip.get('departure_time_iso') else '—'}")
+                st.markdown(f"**Return:** {trip.get('return_time_iso') if trip.get('return_time_iso') else '—'}")
+                if trip.get('notes'):
+                    st.markdown("**Trip notes:**")
+                    st.write(trip.get('notes'))
+            with col2:
+                # show photo if available
+                pic = trip.get('photo_url') or trip.get('picture_url')
+                if pic:
+                    try:
+                        st.image(pic, width=220)
+                    except:
+                        st.write("Vehicle photo available")
+                else:
+                    st.info("No vehicle photo")
+
+            # Receipts
+            receipts_q = "SELECT receipt_id, filename, content_type, file_data FROM dbo.Vehicle_Trip_Receipts WHERE trip_id = ? ORDER BY uploaded_at DESC"
+            receipts_df, receipts_err = execute_query(receipts_q, (trip_id,))
+            st.markdown("---")
+            st.subheader("Receipts & Attachments")
+            if receipts_err:
+                st.error(f"Error loading receipts: {receipts_err}")
+            elif receipts_df is None or len(receipts_df) == 0:
+                st.info("No receipts uploaded for this trip.")
+            else:
+                for _, r in receipts_df.iterrows():
+                    fname = r['filename'] if 'filename' in r else "file"
+                    ctype = r['content_type'] if 'content_type' in r else None
+                    data = r['file_data'] if 'file_data' in r else None
+                    if data is None:
+                        st.write(f"📄 {fname} (no binary data)")
+                        continue
+                    # Ensure we have bytes
+                    try:
+                        binary = data if isinstance(data, (bytes, bytearray)) else bytes(data)
+                    except Exception:
+                        binary = data.tobytes() if hasattr(data, "tobytes") else None
+                    if binary:
+                        key = f"receipt_{r['receipt_id']}"
+                        st.write(f"📄 {fname}")
+                        st.download_button(label="Download", data=binary, file_name=fname, mime=ctype or "application/octet-stream", key=key)
+                    else:
+                        st.write(f"📄 {fname} (could not prepare download)")
+
+            # Action buttons for trip (admin actions)
+            st.markdown("---")
+            col_a, col_b = st.columns(2)
+            with col_a:
+                if st.button("Close Trip Details"):
+                    st.session_state.view_trip_id = None
+                    safe_rerun()
+            with col_b:
+                # Quick-mark-return convenience (calls stored proc). This is a simple helper for admins.
+                if st.button("Mark Returned (admin)"):
+                    try:
+                        ret_m = st.number_input("Returning mileage", min_value=0, value=trip.get('starting_mileage') or 0, key=f"ret_m_{trip_id}")
+                        ret_time = st.text_input("Return time (ISO) or leave blank for now", value=datetime.now().isoformat(), key=f"ret_time_{trip_id}")
+                        if st.button("Confirm Return", key=f"confirm_return_{trip_id}"):
+                            rm = int(ret_m) if ret_m else None
+                            rt = datetime.fromisoformat(ret_time) if ret_time else None
+                            success, err = execute_non_query("EXEC dbo.sp_ReturnVehicleTrip ?, ?, ?, ?", (trip_id, rm, rt, "Returned via admin UI"))
+                            if success:
+                                st.success("Trip marked Returned.")
+                                st.session_state.view_trip_id = None
+                                safe_rerun()
+                            else:
+                                st.error(f"Return failed: {err}")
+                    except Exception as e:
+                        st.error(f"Return flow error: {e}")
+
+    # Main vehicles listing (ordered by availability then least used)
+    st.subheader("Vehicles")
+    # Cast DATETIMEOFFSET -> ISO string to avoid pyodbc/pandas unsupported type issues
+    vehicles_q = """
+        SELECT v.id, v.year, v.make_model, v.vin, v.license_plate, COALESCE(v.photo_url, v.picture_url) as photo_url,
+               v.initial_mileage, v.current_mileage, v.last_service_date, v.status as vehicle_status, v.usage_count,
+               t.trip_id, t.status as trip_status, t.starting_mileage, t.destination,
+               CONVERT(VARCHAR(33), t.departure_time, 127) AS departure_time_iso,
+               t.requester_first, t.requester_last
+        FROM dbo.vehicles v
+        LEFT JOIN dbo.Vehicle_Trips t ON v.current_trip_id = t.trip_id
+        ORDER BY
+          CASE WHEN v.status = 'Available' THEN 0
+               WHEN v.status = 'In Use' THEN 1
+               WHEN v.status = 'Maintenance' THEN 2
+               WHEN v.status = 'Out of Service' THEN 3
+               ELSE 4 END,
+          ISNULL(v.usage_count, 0) ASC,
+          v.id ASC
+    """
+    vehicles_df, vehicles_err = execute_query(vehicles_q)
+    if vehicles_err:
+        st.error(f"Error loading vehicles: {vehicles_err}")
+    elif vehicles_df is None or len(vehicles_df) == 0:
+        st.info("No vehicles found.")
+    else:
+        # render each vehicle as a card with trip summary if in use
+        for _, v in vehicles_df.iterrows():
+            vid = v['id']
+            make = v.get('make_model') or ""
+            plate = v.get('license_plate') or ""
+            vstatus = v.get('vehicle_status') or ""
+            usage = int(v.get('usage_count') or 0)
+            cur_m = v.get('current_mileage') if 'current_mileage' in v else v.get('initial_mileage')
+            photo = v.get('photo_url')
+
+            with st.container():
+                cols = st.columns([6, 2, 1])
+                with cols[0]:
+                    st.markdown(f"**{make}**  —  Plate: {plate}")
+                    st.write(f"Status: **{vstatus}** — Usage: {usage} times")
+                    st.write(f"Current mileage: {cur_m if cur_m is not None else '—'}")
+                    # If vehicle is in use, show brief trip info and view button
+                    if v.get('trip_id') and v.get('trip_status') in ('In Use', 'Approved'):
+                        st.markdown("**Active trip:**")
+                        st.write(f"Driver: {v.get('requester_first','')} {v.get('requester_last','')}")
+                        st.write(f"Start mileage: {v.get('starting_mileage')}")
+                        st.write(f"Destination: {v.get('destination') or '—'}")
+                        st.write(f"Departure: {v.get('departure_time_iso') or '—'}")
+                with cols[1]:
+                    if photo:
+                        try:
+                            st.image(photo, width=140)
+                        except:
+                            st.write("📷 Photo")
+                with cols[2]:
+                    # Buttons: view trip (if exists) or view vehicle details
+                    if v.get('trip_id'):
+                        if st.button("View Trip", key=f"view_trip_{vid}"):
+                            st.session_state.view_trip_id = int(v.get('trip_id'))
+                            safe_rerun()
+                    else:
+                        if st.button("View", key=f"view_vehicle_{vid}"):
+                            # show simple vehicle inspector by setting a session var and reusing view_trip_id==None to avoid conflict
+                            st.session_state.view_vehicle_id = vid
+                            safe_rerun()
+
+            st.markdown("---")
+
+    # Optional: show a simple vehicle inspector when view_vehicle_id is set (not trip)
+    if 'view_vehicle_id' not in st.session_state:
+        st.session_state.view_vehicle_id = None
+
+    if st.session_state.view_vehicle_id and not st.session_state.view_trip_id:
+        vid = st.session_state.view_vehicle_id
+        st.subheader(f"Vehicle #{vid} Details")
+        vq = "SELECT * FROM dbo.vehicles WHERE id = ?"
+        vdf, verr = execute_query(vq, (vid,))
+        if verr or vdf is None or len(vdf) == 0:
+            st.error("Vehicle not found")
+            st.session_state.view_vehicle_id = None
+        else:
+            vinfo = vdf.iloc[0]
+            st.write(vinfo)
+            if st.button("Close Vehicle"):
+                st.session_state.view_vehicle_id = None
+                safe_rerun()
+# ======= end enhanced Fleet Management Page =======
+
+elif page == "🛒 Procurement":
+    st.header("🛒 Procurement Management")
+
+    # Initialize procurement session states
+    if 'show_create_procurement' not in st.session_state:
+        st.session_state.show_create_procurement = False
+    if 'view_procurement_id' not in st.session_state:
+        st.session_state.view_procurement_id = None
+    if 'procurement_items' not in st.session_state:
+        st.session_state.procurement_items = []
+
+    # Check if procurement tables exist
+    check_table_query = """
+        SELECT COUNT(*) as table_count
+        FROM INFORMATION_SCHEMA.TABLES
+        WHERE TABLE_SCHEMA = 'dbo'
+        AND TABLE_NAME = 'Procurement_Requests'
+    """
+    table_check, error = execute_query(check_table_query)
+
+    if error or table_check is None or table_check.iloc[0]['table_count'] == 0:
+        st.warning("⚠️ Procurement system not set up yet. Please run the setup SQL script.")
+        st.markdown("""
+        ### Setup Required:
+        1. Download: `setup_procurement_system.sql`
+        2. Run in Azure SQL Query Editor
+        3. Refresh this page
+
+        [View Setup Instructions](https://github.com/your-repo)
+        """)
+    else:
+        # Procurement is set up - show interface
+
+        # Back button if viewing details
+        if st.session_state.view_procurement_id:
+            if st.button("← Back to Procurement List"):
+                st.session_state.view_procurement_id = None
+                safe_rerun()
+
+            st.markdown("---")
+
+            # Load procurement request details
+            proc_query = f"""
+                SELECT pr.*,
+                    CONCAT(a1.first_name, ' ', a1.last_name) as level1_approver,
+                    CONCAT(a2.first_name, ' ', a2.last_name) as level2_approver
+                FROM dbo.Procurement_Requests pr
+                LEFT JOIN dbo.Procurement_Approvers a1 ON pr.level1_approver_id = a1.approver_id
+                LEFT JOIN dbo.Procurement_Approvers a2 ON pr.level2_approver_id = a2.approver_id
+                WHERE pr.request_id = {st.session_state.view_procurement_id}
+            """
+            proc_df, error = execute_query(proc_query)
+
+            if error or proc_df is None or len(proc_df) == 0:
+                st.error("Procurement request not found")
+                st.session_state.view_procurement_id = None
+            else:
+                proc = proc_df.iloc[0]
+
+                # Header
+                col1, col2, col3 = st.columns([3, 1, 1])
+                with col1:
+                    st.subheader(f"Request {proc['request_number']}")
+                with col2:
+                    status_colors = {
+                        'draft': '⚪', 'pending_level1': '🟠', 'pending_level2': '🔵',
+                        'approved': '🟢', 'rejected': '🔴', 'ordered': '🔵',
+                        'received': '🟢', 'cancelled': '⚫'
+                    }
+                    st.write(f"{status_colors.get(proc['status'], '⚪')} Status: **{proc['status'].upper()}**")
+                with col3:
+                    priority_colors = {'low': '🟢', 'normal': '⚪', 'high': '🟠', 'urgent': '🔴'}
+                    st.write(f"{priority_colors.get(proc['priority'], '⚪')} Priority: **{proc['priority'].upper()}**")
+
+                st.markdown("---")
+
+                # Request Details
+                col1, col2 = st.columns(2)
+
+                with col1:
+                    st.subheader("📋 Request Information")
+                    st.write(f"**Request Date:** {proc['request_date']}")
+                    st.write(f"**Requester:** {proc['requester_name']}")
+                    st.write(f"**Email:** {proc['requester_email']}")
+                    if proc['requester_phone']:
+                        st.write(f"**Phone:** {proc['requester_phone']}")
+                    st.write(f"**Location:** {proc['location']}")
+                    if proc['department']:
+                        st.write(f"**Department:** {proc['department']}")
+
+                with col2:
+                    st.subheader("💰 Financial Information")
+                    st.write(f"**Total Amount:** ${proc['total_amount']:,.2f}")
+                    if proc['cst_code']:
+                        st.write(f"**CST Code:** {proc['cst_code']}")
+                    if proc['coa_code']:
+                        st.write(f"**COA Code:** {proc['coa_code']}")
+                    if proc['prog_code']:
+                        st.write(f"**PROG Code:** {proc['prog_code']}")
+                    if proc['fund_code']:
+                        st.write(f"**FUND Code:** {proc['fund_code']}")
+
+                st.markdown("---")
+
+                # Line Items
+                st.subheader("📦 Line Items")
+                items_query = f"""
+                    SELECT * FROM dbo.Procurement_Items
+                    WHERE request_id = {st.session_state.view_procurement_id}
+                    ORDER BY line_number
+                """
+                items_df, error = execute_query(items_query)
+
+                if not error and items_df is not None and len(items_df) > 0:
+                    # Display as formatted table
+                    display_df = items_df[['line_number', 'item_description', 'quantity', 'unit_price', 'total_price']].copy()
+                    display_df.columns = ['#', 'Description', 'Qty', 'Unit Price', 'Total']
+                    display_df['Unit Price'] = display_df['Unit Price'].apply(lambda x: f"${x:,.2f}")
+                    display_df['Total'] = display_df['Total'].apply(lambda x: f"${x:,.2f}")
+                    st.dataframe(display_df, use_container_width=True, hide_index=True)
+
+                    st.write(f"**Grand Total:** ${items_df['total_price'].sum():,.2f}")
+                else:
+                    st.info("No line items added yet")
+
+                st.markdown("---")
+
+                # Justification
+                if proc['justification']:
+                    st.subheader("📝 Justification")
+                    st.write(proc['justification'])
+                    st.markdown("---")
+
+                # Attachments / Photos
+                if proc['attachments']:
+                    st.subheader("📎 Attachments")
+                    try:
+                        import json
+                        import base64
+                        from io import BytesIO
+                        attachments = json.loads(proc['attachments'])
+
+                        if attachments:
+                            cols = st.columns(min(len(attachments), 4))
+                            for idx, attachment in enumerate(attachments):
+                                col_idx = idx % 4
+                                with cols[col_idx]:
+                                    filename = attachment.get('filename', 'file')
+                                    file_type = attachment.get('type', '')
+                                    file_data = attachment.get('data', '')
+
+                                    # Display images
+                                    if file_type.startswith('image/'):
+                                        try:
+                                            img_bytes = base64.b64decode(file_data)
+                                            st.image(img_bytes, caption=filename, use_container_width=True)
+                                        except:
+                                            st.write(f"📷 {filename}")
+                                    else:
+                                        # Display file link/info
+                                        st.write(f"📄 {filename}")
+                                        # Offer download
+                                        try:
+                                            file_bytes = base64.b64decode(file_data)
+                                            st.download_button(
+                                                label=f"Download",
+                                                data=file_bytes,
+                                                file_name=filename,
+                                                mime=file_type,
+                                                key=f"download_{idx}"
+                                            )
+                                        except:
+                                            pass
+                            st.markdown("---")
+                    except Exception as e:
+                        st.info("Attachments available but could not be displayed")
+                        st.markdown("---")
+
+                # Approval Status
+                st.subheader("✅ Approval Status")
+                col1, col2 = st.columns(2)
+
+                with col1:
+                    st.write("**Level 1 Authorization:**")
+                    if proc['level1_approved_at']:
+                        st.success(f"✅ Approved by {proc['level1_approver']} on {proc['level1_approved_at']}")
+                    elif proc['status'] in ['pending_level1', 'pending_level2', 'approved']:
+                        st.info(f"⏳ Pending: {proc['level1_approver'] if proc['level1_approver'] else 'Not assigned'}")
+                    else:
+                        st.warning("⏸️ Not submitted")
+
+                with col2:
+                    st.write("**Level 2 Approval:**")
+                    if proc['level2_approved_at']:
+                        st.success(f"✅ Approved by {proc['level2_approver']} on {proc['level2_approved_at']}")
+                    elif proc['status'] == 'pending_level2':
+                        st.info(f"⏳ Pending: {proc['level2_approver'] if proc['level2_approver'] else 'Not assigned'}")
+                    else:
+                        st.warning("⏸️ Awaiting Level 1")
+
+                st.markdown("---")
+
+                # ========== PHASE 2: ACTION BUTTONS ==========
+                st.subheader("⚡ Actions")
+
+                # Initialize action states
+                if 'show_edit_procurement' not in st.session_state:
+                    st.session_state.show_edit_procurement = False
+                if 'show_add_items' not in st.session_state:
+                    st.session_state.show_add_items = False
+                if 'show_add_note' not in st.session_state:
+                    st.session_state.show_add_note = False
+
+                action_col1, action_col2, action_col3, action_col4, action_col5 = st.columns(5)
+
+                # Submit for Approval (Draft only)
+                if proc['status'] == 'draft':
+                    with action_col1:
+                        if st.button("📤 Submit for Approval"):
+                            # Assign to first Level 1 approver
+                            get_approver = "SELECT TOP 1 approver_id FROM dbo.Procurement_Approvers WHERE approval_level = 1 AND is_active = 1"
+                            approver_df, _ = execute_query(get_approver)
+                            if approver_df is not None and len(approver_df) > 0:
+                                approver_id = approver_df.iloc[0]['approver_id']
+                                update_query = """
+                                    UPDATE dbo.Procurement_Requests
+                                    SET status = 'pending_level1', level1_approver_id = ?, updated_at = GETDATE()
+                                    WHERE request_id = ?
+                                """
+                                success, error = execute_non_query(update_query, (approver_id, st.session_state.view_procurement_id))
+                                if success:
+                                    st.success("✅ Submitted for Level 1 approval!")
+                                    safe_rerun()
+                                else:
+                                    st.error(f"Error: {error}")
+
+                # ... rest of file continues unchanged ...
+
+# Footer
+st.markdown("---")
+st.markdown("*VDH Service Center - v5.0 | Virginia Department of Health © 2025*")

@@ -1,0 +1,120 @@
+2025-11-10 15:33:02.209 Starting new event loop for server
+2025-11-10 15:33:02.210 Starting server...
+2025-11-10 15:33:02.211 Serving static content from C:\Users\Admin\OneDrive\Documents\GitHub\vdh-helpdesk-app\.venv\Lib\site-packages\streamlit\static
+2025-11-10 15:33:02.627 Server started on port 8501
+2025-11-10 15:33:02.627 Runtime state: RuntimeState.INITIAL -> RuntimeState.NO_SESSIONS_CONNECTED
+
+  You can now view your Streamlit app in your browser.
+
+  Local URL: http://localhost:8501
+  Network URL: http://192.168.12.74:8501
+
+2025-11-10 15:33:02.631 Setting up signal handler
+2025-11-10 15:33:03.087 No singleton. Registering one.
+2025-11-10 15:33:03.089 Watcher created for C:\Users\Admin\OneDrive\Documents\GitHub\vdh-helpdesk-app\helpdesk_app.py
+2025-11-10 15:33:03.090 AppSession initialized (id=5fed4d8f-ce48-43d1-ba72-9374109b1e28)
+2025-11-10 15:33:03.090 Created new session for client 2540677221408. Session ID: 5fed4d8f-ce48-43d1-ba72-9374109b1e28
+2025-11-10 15:33:03.090 Runtime state: RuntimeState.NO_SESSIONS_CONNECTED -> RuntimeState.ONE_OR_MORE_SESSIONS_CONNECTED
+2025-11-10 15:33:03.903 Watcher created for C:\Users\Admin\OneDrive\Documents\GitHub\vdh-helpdesk-app\helpdesk_app.py
+2025-11-10 15:33:03.903 AppSession initialized (id=d60594f2-f985-45a8-beb4-226ec1d1a844)
+2025-11-10 15:33:03.903 Created new session for client 2540677417872. Session ID: d60594f2-f985-45a8-beb4-226ec1d1a844
+2025-11-10 15:33:03.903 Runtime state: RuntimeState.ONE_OR_MORE_SESSIONS_CONNECTED -> RuntimeState.ONE_OR_MORE_SESSIONS_CONNECTED
+2025-11-10 15:33:04.045 Watcher created for C:\Users\Admin\OneDrive\Documents\GitHub\vdh-helpdesk-app\helpdesk_app.py
+2025-11-10 15:33:04.045 AppSession initialized (id=d0723fe0-131c-44d0-b85d-6ecec17842a8)
+2025-11-10 15:33:04.045 Created new session for client 2540677423632. Session ID: d0723fe0-131c-44d0-b85d-6ecec17842a8
+2025-11-10 15:33:04.045 Runtime state: RuntimeState.ONE_OR_MORE_SESSIONS_CONNECTED -> RuntimeState.ONE_OR_MORE_SESSIONS_CONNECTED
+2025-11-10 15:33:04.064 Received the following back message:
+rerun_script {
+  widget_states {
+  }
+  context_info {
+    timezone: "America/New_York"
+    timezone_offset: 300
+    locale: "en-US"
+    url: "http://localhost:8501/"
+    is_embedded: false
+    color_scheme: "light"
+  }
+}
+
+2025-11-10 15:33:04.064 Beginning script thread
+2025-11-10 15:33:04.065 Running script RerunData(widget_states=, context_info=timezone: "America/New_York"
+timezone_offset: 300
+locale: "en-US"
+url: "http://localhost:8501/"
+is_embedded: false
+color_scheme: "light"
+)
+2025-11-10 15:33:04.065 Disconnecting files for session with ID d0723fe0-131c-44d0-b85d-6ecec17842a8
+2025-11-10 15:33:04.066 Sessions still active: dict_keys([])
+2025-11-10 15:33:04.066 Files: 0; Sessions with files: 0
+2025-11-10 15:33:05.620 Adding media file 544704f6b2411f141fd920a5123938cf76c902dea5f68fd492dd644a
+2025-11-10 15:33:05.710 MediaFileHandler: GET 544704f6b2411f141fd920a5123938cf76c902dea5f68fd492dd644a.jpg
+2025-11-10 15:33:05.710 MediaFileHandler: Sending image/jpeg file 544704f6b2411f141fd920a5123938cf76c902dea5f68fd492dd644a.jpg
+2025-11-10 15:33:05.865 Creating new ResourceCache (key=3b554e523a4aaaa0148d25262a159594)
+2025-11-10 15:33:05.865 Cache key: d41d8cd98f00b204e9800998ecf8427e
+2025-11-10 15:33:07.062 Cache key: d41d8cd98f00b204e9800998ecf8427e
+2025-11-10 15:33:07.672 Cache key: d41d8cd98f00b204e9800998ecf8427e
+2025-11-10 15:33:08.933 Cache key: d41d8cd98f00b204e9800998ecf8427e
+2025-11-10 15:33:09.495 Cache key: d41d8cd98f00b204e9800998ecf8427e
+2025-11-10 15:33:10.065 Cache key: d41d8cd98f00b204e9800998ecf8427e
+2025-11-10 15:33:10.627 Cache key: d41d8cd98f00b204e9800998ecf8427e
+2025-11-10 15:33:11.247 Cache key: d41d8cd98f00b204e9800998ecf8427e
+2025-11-10 15:33:11.765 Removing orphaned files...
+2025-11-10 15:33:12.728 Watcher created for C:\Users\Admin\OneDrive\Documents\GitHub\vdh-helpdesk-app\fleet
+2025-11-10 15:33:12.730 Watcher created for C:\Users\Admin\OneDrive\Documents\GitHub\vdh-helpdesk-app\fleet\fleet_db.py
+2025-11-10 15:33:12.732 Received the following back message:
+rerun_script {
+  widget_states {
+    widgets {
+      id: "$$ID-3d601ffe5a9d101df607929f46ab06e2-None"
+      string_value: "\U0001f3ab Tickets"
+    }
+  }
+  page_script_hash: "54afc2a17605227aef8a172537a40a98"
+  context_info {
+    timezone: "America/New_York"
+    timezone_offset: 300
+    locale: "en-US"
+    url: "http://localhost:8501/"
+    is_embedded: false
+    color_scheme: "light"
+  }
+}
+
+2025-11-10 15:33:12.733 Beginning script thread
+2025-11-10 15:33:12.733 Running script RerunData(widget_states=widgets {
+  id: "$$ID-3d601ffe5a9d101df607929f46ab06e2-None"
+  string_value: "\U0001f3ab Tickets"
+}
+, page_script_hash='54afc2a17605227aef8a172537a40a98', context_info=timezone: "America/New_York"
+timezone_offset: 300
+locale: "en-US"
+url: "http://localhost:8501/"
+is_embedded: false
+color_scheme: "light"
+)
+2025-11-10 15:33:12.734 Disconnecting files for session with ID d0723fe0-131c-44d0-b85d-6ecec17842a8
+2025-11-10 15:33:12.734 Sessions still active: dict_keys([])
+2025-11-10 15:33:12.734 Files: 1; Sessions with files: 0
+2025-11-10 15:33:12.747 Removing orphaned files...
+  Stopping...
+2025-11-10 15:34:29.192 Runtime stopping...
+2025-11-10 15:34:29.192 Runtime state: RuntimeState.ONE_OR_MORE_SESSIONS_CONNECTED -> RuntimeState.STOPPING
+2025-11-10 15:34:29.193 Shutting down (id=5fed4d8f-ce48-43d1-ba72-9374109b1e28)
+2025-11-10 15:34:29.193 Disconnecting files for session with ID 5fed4d8f-ce48-43d1-ba72-9374109b1e28
+2025-11-10 15:34:29.193 Sessions still active: dict_keys(['d0723fe0-131c-44d0-b85d-6ecec17842a8'])
+2025-11-10 15:34:29.194 Files: 1; Sessions with files: 1
+2025-11-10 15:34:29.194 Removing orphaned files...
+2025-11-10 15:34:29.195 Shutting down (id=d60594f2-f985-45a8-beb4-226ec1d1a844)
+2025-11-10 15:34:29.196 Disconnecting files for session with ID d60594f2-f985-45a8-beb4-226ec1d1a844
+2025-11-10 15:34:29.196 Sessions still active: dict_keys(['d0723fe0-131c-44d0-b85d-6ecec17842a8'])
+2025-11-10 15:34:29.196 Files: 1; Sessions with files: 1
+2025-11-10 15:34:29.196 Removing orphaned files...
+2025-11-10 15:34:29.198 Shutting down (id=d0723fe0-131c-44d0-b85d-6ecec17842a8)
+2025-11-10 15:34:29.198 Disconnecting files for session with ID d0723fe0-131c-44d0-b85d-6ecec17842a8
+2025-11-10 15:34:29.198 Sessions still active: dict_keys([])
+2025-11-10 15:34:29.198 Files: 1; Sessions with files: 0
+2025-11-10 15:34:29.198 Removing orphaned files...
+2025-11-10 15:34:29.199 Deleting File: 544704f6b2411f141fd920a5123938cf76c902dea5f68fd492dd644a
+2025-11-10 15:34:29.204 Runtime state: RuntimeState.STOPPING -> RuntimeState.STOPPED
