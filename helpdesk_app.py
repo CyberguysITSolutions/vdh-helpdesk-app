@@ -428,6 +428,12 @@ def _attempt_admin_login(password: str) -> bool:
 
 with st.sidebar:
     st.markdown("## Navigate")
+    # Quick link to public ticket submission page
+    st.sidebar.markdown("""
+    <ul style="list-style-type: none; padding-left: 0;">
+        <li><a href="/01_Public_Create_Ticket">Submit a Ticket</a></li>
+    </ul>
+    """, unsafe_allow_html=True)
     if st.session_state.is_admin:
         st.markdown("**Signed in as Admin**")
         if st.button("🔒 Logout"):
