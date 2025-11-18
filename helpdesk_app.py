@@ -466,6 +466,17 @@ else:
     ]
 
 page = st.sidebar.selectbox("Navigate", NAV_ITEMS)
+
+# Public Access Forms section in sidebar
+with st.sidebar:
+    st.markdown("---")
+    st.markdown("### Public Access Forms")
+    st.markdown("""
+    <ul style="list-style-type: none; padding-left: 0;">
+        <li><a href="./pages/01_Public_Create_Ticket" target="_blank" rel="noopener">Submit a Ticket</a></li>
+    </ul>
+    """, unsafe_allow_html=True)
+
 # --- END ROLE-BASED NAVIGATION SNIPPET ------------------------------------
 
 # Header with VDH Logo
