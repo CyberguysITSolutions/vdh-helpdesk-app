@@ -473,7 +473,7 @@ with st.sidebar:
     st.markdown("### Public Access Forms")
     st.markdown("""
     <ul style="list-style-type: none; padding-left: 0;">
-        <li><a href="./pages/01_Public_Create_Ticket" target="_blank" rel="noopener">Submit a Ticket</a></li>
+        <li><a href="/01_Public_Create_Ticket" target="_blank" rel="noopener">Submit a Ticket</a></li>
     </ul>
     """, unsafe_allow_html=True)
 

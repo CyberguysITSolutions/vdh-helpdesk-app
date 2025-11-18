@@ -17,7 +17,7 @@ import pandas as pd
 try:
     import pyodbc
     HAS_PYODBC = True
-except Exception:
+except ImportError:
     HAS_PYODBC = False
 
 # Page config
@@ -43,7 +43,7 @@ def get_connection_string():
 
 def get_db_connection():
     if MOCK_DATA:
-        raise ConnectionError("MOCK_DATA enabled - no DB connection in public_ticket.py")
+        raise ConnectionError("MOCK_DATA enabled - no DB connection in 01_Public_Create_Ticket.py")
     if not HAS_PYODBC:
         raise ConnectionError("pyodbc is not available in this environment.")
     server, database, username, password = get_connection_string()
@@ -92,7 +92,8 @@ def execute_non_query(query: str, params: Optional[tuple] = None) -> Tuple[bool,
 
 def insert_and_get_id(insert_sql: str, params: tuple = None) -> Tuple[Optional[int], Optional[str]]:
     if MOCK_DATA:
-        return int(datetime.utcnow().timestamp()), None
+        import random
+        return random.randint(10000, 99999), None
     try:
         conn = get_db_connection()
     except Exception as e:
