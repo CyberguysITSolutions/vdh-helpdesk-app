@@ -455,11 +455,16 @@ st.sidebar.title("VDH Service Center")
 # Public forms links for external users (these are references; deploy public forms separately)
 st.sidebar.markdown("---")
 st.sidebar.subheader("🌐 Public Access Forms")
-st.sidebar.markdown("""
-- Submit a Ticket: ./public_ticket_form.py
-- Request a Vehicle: ./public_vehicle_request.py
-- Submit a Requisition: ./public_procurement_form.py
-""")
+st.sidebar.markdown(
+    """
+<ul>
+  <li><a href="./?page=pages/01_Public_Create_Ticket.py" target="_blank" rel="noopener">Submit a Ticket</a></li>
+  <li><a href="./?page=pages/02_Public_Request_Vehicle.py" target="_blank" rel="noopener">Request a Vehicle</a></li>
+  <li><a href="./?page=pages/03_Public_Procurement_Request.py" target="_blank" rel="noopener">Submit a Requisition</a></li>
+</ul>
+""",
+    unsafe_allow_html=True,
+)
 
 page = st.sidebar.selectbox("Navigate", [
     "📊 Dashboard",
