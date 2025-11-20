@@ -1,6 +1,7 @@
 # FULL MERGED helpdesk_app.py
 # (Save this file to replace the current helpdesk_app.py after backing it up)
 import streamlit as st
+import streamlit.components.v1 as components
 import pandas as pd
 from datetime import datetime, timedelta
 import os
@@ -13,6 +14,16 @@ import traceback
 import logging
 import smtplib
 from email.message import EmailMessage
+# near the other imports at top of helpdesk_app.py
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    # for editor type-checking only
+    import streamlit.components.v1 as components  # type: ignore
+try:
+    import streamlit.components.v1 as components
+except Exception:
+    components = None  # runtime fallback if streamlit not available
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -20,6 +31,78 @@ logger = logging.getLogger(__name__)
 
 # Page configuration
 st.set_page_config(page_title="VDH Service Center", page_icon="🏥", layout="wide")
+st.markdown(
+    """
+    <style>
+      /* Hide Streamlit header (app title/hamburger) to remove the 'helpdesk app' breadcrumb */
+      header[role="banner"] { display: none !important; }
+
+      /* Hide Streamlit default top-of-sidebar pages navigation (when using pages/) */
+      /* This selector targets the built-in pages navigation area — if it doesn't match your version of Streamlit, remove it and keep header hide only */
+      div[data-testid="stSidebarNav"] { display: none !important; }
+
+      /* Optional: keep the sidebar title area visible; adjust if you hide too much */
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
+# Guarded injection: only run if components is available
+if components is not None:
+    components.html(
+        """
+<script>
+(function() {
+  function applyUiTweaks() {
+    try {
+      var origin = window.location.origin || (window.location.protocol + '//' + window.location.host);
+      var map = {
+        'public-ticket-link': '/?page=pages/01_Public_Create_Ticket.py',
+        'public-vehicle-link': '/?page=pages/02_Public_Request_Vehicle.py',
+        'public-procurement-link': '/?page=pages/03_Public_Procurement_Request.py'
+      };
+      Object.keys(map).forEach(function(id) {
+        var el = document.getElementById(id);
+        if (el) {
+          el.href = origin + map[id];
+        }
+      });
+      var header = document.querySelector('header[role="banner"]');
+      if (header) header.style.display = 'none';
+      var sidebarNav = document.querySelector('div[data-testid="stSidebarNav"]');
+      if (sidebarNav) sidebarNav.style.display = 'none';
+      var navFallback = document.querySelector('div[aria-label="App header"], div[role="navigation"]');
+      if (navFallback) navFallback.style.display = 'none';
+      document.querySelectorAll('a').forEach(function(a){
+        if (a.textContent && a.textContent.trim().toLowerCase().includes('helpdesk app')) {
+          a.style.display = 'none';
+        }
+      });
+    } catch (e) {
+      console.warn('UI tweak script error', e);
+    }
+  }
+  applyUiTweaks();
+  var tries = 0;
+  var intv = setInterval(function() {
+    applyUiTweaks();
+    tries += 1;
+    if (tries > 20) clearInterval(intv);
+  }, 300);
+})();
+</script>
+<style>
+header[role="banner"] { display: none !important; }
+div[data-testid="stSidebarNav"] { display: none !important; }
+div[aria-label="App header"] { display: none !important; }
+</style>
+""",
+        height=1,
+        scrolling=False,
+    )
+else:
+    # Optional: display a small note in-app if components unavailable (helps debugging)
+    st.caption("UI tweak script not applied: streamlit.components not available in environment.")
 
 # Try to import pyodbc
 try:
@@ -449,22 +532,42 @@ if 'view_trip_id' not in st.session_state:
 # Sidebar / Navigation (add public links)
 # ============================================================================
 
-st.sidebar.image("https://via.placeholder.com/200x80/002855/FFFFFF?text=VDH", use_container_width=True)
+st.sidebar.image("https://via.placeholder.com/200x80/002855/FFFFFF?text=VDH", width='stretch')
 st.sidebar.title("VDH Service Center")
 
 # Public forms links for external users (these are references; deploy public forms separately)
+# --- Replace the previous st.sidebar.markdown(...) public-links block with this components.html ---
 st.sidebar.markdown("---")
 st.sidebar.subheader("🌐 Public Access Forms")
-st.sidebar.markdown(
+
+components.html(
     """
-<ul>
-  <li><a href="./?page=pages/01_Public_Create_Ticket.py" target="_blank" rel="noopener">Submit a Ticket</a></li>
-  <li><a href="./?page=pages/02_Public_Request_Vehicle.py" target="_blank" rel="noopener">Request a Vehicle</a></li>
-  <li><a href="./?page=pages/03_Public_Procurement_Request.py" target="_blank" rel="noopener">Submit a Requisition</a></li>
-</ul>
-""",
-    unsafe_allow_html=True,
+    <div style="line-height:1.8;">
+      <a id="pt" href="#" style="text-decoration:none;color:#005ea6;font-weight:600;">Submit a Ticket</a><br/>
+      <a id="pv" href="#" style="text-decoration:none;color:#005ea6;font-weight:600;">Request a Vehicle</a><br/>
+      <a id="pp" href="#" style="text-decoration:none;color:#005ea6;font-weight:600;">Submit a Requisition</a>
+    </div>
+    <script>
+      (function(){
+        var origin = window.location.origin || (window.location.protocol + '//' + window.location.host);
+        function openPage(path) {
+          // IMPORTANT: do NOT encode the slash characters; Streamlit expects page=pages/filename.py exactly
+          var url = origin + '/?page=' + path;
+          window.open(url, '_blank', 'noopener');
+        }
+        var a1 = document.getElementById('pt');
+        var a2 = document.getElementById('pv');
+        var a3 = document.getElementById('pp');
+        if (a1) a1.addEventListener('click', function(e){ e.preventDefault(); openPage('pages/01_Public_Create_Ticket.py'); });
+        if (a2) a2.addEventListener('click', function(e){ e.preventDefault(); openPage('pages/02_Public_Request_Vehicle.py'); });
+        if (a3) a3.addEventListener('click', function(e){ e.preventDefault(); openPage('pages/03_Public_Procurement_Request.py'); });
+      })();
+    </script>
+    """,
+    height=90,
+    scrolling=False,
 )
+
 
 page = st.sidebar.selectbox("Navigate", [
     "📊 Dashboard",
@@ -528,7 +631,7 @@ if page == "📊 Dashboard":
         st.write("**Tickets by Status**")
         if status_df is not None and len(status_df)>0:
             fig = px.pie(status_df, values='count', names='status', color_discrete_sequence=[VDH_NAVY, VDH_ORANGE, '#FFC857', '#4CAF50', '#E63946'])
-            st.plotly_chart(fig, config={"displayModeBar": False}, use_container_width=True)
+            st.plotly_chart(fig, config={"displayModeBar": False}, width='stretch')
         else:
             st.info("No ticket status data available")
     with c2:
@@ -539,7 +642,7 @@ if page == "📊 Dashboard":
             priority_df = priority_df.sort_values('sort_order')
             fig = px.bar(priority_df, x='priority', y='count', color_discrete_sequence=[VDH_NAVY])
             fig.update_layout(xaxis_title="Priority", yaxis_title="Count")
-            st.plotly_chart(fig, config={"displayModeBar": False}, use_container_width=True)
+            st.plotly_chart(fig, config={"displayModeBar": False}, width='stretch')
         else:
             st.info("No ticket priority data available")
     with c3:
@@ -548,7 +651,7 @@ if page == "📊 Dashboard":
             fig = px.bar(location_df, x='location', y='count', color_discrete_sequence=[VDH_ORANGE])
             fig.update_layout(xaxis_title="Location", yaxis_title="Count")
             fig.update_xaxes(tickangle=-45)
-            st.plotly_chart(fig, config={"displayModeBar": False}, use_container_width=True)
+            st.plotly_chart(fig, config={"displayModeBar": False}, width='stretch')
         else:
             st.info("No ticket location data available")
 
@@ -636,6 +739,27 @@ elif page == "🎫 Helpdesk Tickets":
             if cancel_button:
                 st.session_state.show_create_ticket = False
                 safe_rerun()
+
+    # === DEBUG BLOCK FOR TICKETS (insert immediately BEFORE `if st.session_state.view_ticket_id:`) ===
+    # Temporary debug: show whether tickets SELECT returns rows (safe, read-only)
+    st.markdown("---")
+    st.subheader("DEBUG - Tickets List Check (temporary)")
+    tickets_check_query = "SELECT TOP (50) * FROM dbo.Tickets ORDER BY created_at DESC"
+    tickets_df, tickets_err = execute_query(tickets_check_query)
+    st.write("DEBUG: tickets_check_query:", tickets_check_query)
+    st.write("DEBUG: tickets_fetch_error:", tickets_err)
+    if tickets_df is None:
+        st.write("DEBUG: tickets_df is None (connection/query error)")
+    elif isinstance(tickets_df, pd.DataFrame) and len(tickets_df) == 0:
+        st.write("DEBUG: tickets_df is empty (no rows returned)")
+    else:
+        try:
+            st.write(f"DEBUG: tickets_df shape: {getattr(tickets_df, 'shape', 'unknown')}")
+            st.dataframe(tickets_df.head(20), width='stretch')
+        except Exception as _dbg_e:
+            st.write("DEBUG: error rendering tickets_df preview:", repr(_dbg_e))
+    st.markdown("---")
+    # === END TICKETS DEBUG BLOCK ===
 
     # View / Update Ticket (requires notes)
     if st.session_state.view_ticket_id:
@@ -991,6 +1115,24 @@ elif page == "💻 Asset Management":
 
 elif page == "🛒 Procurement Requests":
     st.header("🛒 Procurement Requests")
+    # === DEBUG BLOCK FOR PROCUREMENT (insert immediately after `elif page == "🛒 Procurement Requests":`) ===
+    # Temporary debug: show whether procurement SELECT returns rows (safe, read-only)
+    proc_check_q = "SELECT TOP (50) * FROM dbo.Procurement_Requests ORDER BY created_at DESC"
+    proc_df, proc_err = execute_query(proc_check_q)
+    st.write("DEBUG: proc_check_q:", proc_check_q)
+    st.write("DEBUG: proc_fetch_error:", proc_err)
+    if proc_df is None:
+        st.write("DEBUG: proc_df is None (connection/query error)")
+    elif isinstance(proc_df, pd.DataFrame) and len(proc_df) == 0:
+        st.write("DEBUG: proc_df is empty (no rows returned)")
+    else:
+        try:
+            st.write(f"DEBUG: proc_df shape: {getattr(proc_df, 'shape', 'unknown')}")
+            st.dataframe(proc_df.head(20), width='stretch')
+        except Exception as _dbg_e:
+            st.write("DEBUG: error rendering proc_df preview:", repr(_dbg_e))
+    # End procurement debug block (remove once debugging complete)
+    # === END PROCUREMENT DEBUG BLOCK ===
     # (The create / list code is retained from the original app — unchanged)
     # For public access, run public_procurement_form.py as a separate Streamlit app and link via sidebar.
 
@@ -1087,9 +1229,9 @@ elif page == "🚗 Fleet Management":
             col1, col2, col3 = st.columns([1,3,1])
             with col1:
                 if v.get('photo_url'):
-                    st.image(v['photo_url'], use_column_width=True)
+                    st.image(v['photo_url'], width='stretch')
                 else:
-                    st.image("https://via.placeholder.com/250x150.png?text=Vehicle+Image", use_column_width=True)
+                    st.image("https://via.placeholder.com/250x150.png?text=Vehicle+Image", width='stretch')
             with col2:
                 st.markdown(f"### {v.get('make_model','N/A')} — {v.get('license_plate','')}")
                 st.write(f"Year: {v.get('year','N/A')} • VIN: {v.get('vin','N/A')}")
@@ -1162,7 +1304,7 @@ elif page == "📈 Report Builder":
             else:
                 st.success(f"Report generated with {len(df)} records")
                 st.subheader("Report Preview")
-                st.dataframe(df, use_container_width=True)
+                st.dataframe(df, width='stretch')
                 if report_format == "Excel" and HAS_EXCEL:
                     output = generate_excel_report(df, report_type)
                     if output:
@@ -1204,7 +1346,7 @@ elif page == "🔌 Connection Test":
             if cols_err:
                 st.error(cols_err)
             elif cols_df is not None and len(cols_df)>0:
-                st.dataframe(cols_df, use_container_width=True)
+                st.dataframe(cols_df, width='stretch')
             else:
                 st.warning(f"Table {table} not found")
             st.markdown("---")
