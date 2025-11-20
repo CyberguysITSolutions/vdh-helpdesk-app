@@ -1,0 +1,2135 @@
+import streamlit as st
+import pandas as pd
+from datetime import datetime, timedelta
+import os
+import plotly.express as px
+import plotly.graph_objects as go
+from io import BytesIO
+import base64
+from typing import Optional, Tuple
+import traceback
+import logging
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# Page configuration
+st.set_page_config(page_title="VDH Service Center", page_icon="🏥", layout="wide")
+
+# Try to import pyodbc
+try:
+    import pyodbc
+    HAS_PYODBC = True
+except:
+    HAS_PYODBC = False
+    st.error("⚠️ pyodbc not available. Database connections will fail.")
+
+# Try to import reporting libraries
+try:
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    from openpyxl.utils.dataframe import dataframe_to_rows
+    HAS_EXCEL = True
+except:
+    HAS_EXCEL = False
+
+try:
+    from reportlab.lib.pagesizes import letter, A4
+    from reportlab.lib import colors
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, PageBreak
+    from reportlab.lib.units import inch
+    HAS_PDF = True
+except:
+    HAS_PDF = False
+
+# VDH Color Scheme
+VDH_NAVY = "#002855"
+VDH_ORANGE = "#FF6B35"
+
+# Enhanced CSS for VDH branding (replaced original CSS)
+st.markdown(f"""
+<style>
+    .main {{
+        background-color: #f5f5f5;
+    }}
+    .stButton>button {{
+        background-color: {VDH_NAVY};
+        color: white;
+        border-radius: 5px;
+        border: none;
+        padding: 0.5rem 1rem;
+        font-weight: 500;
+    }}
+    .stButton>button:hover {{
+        background-color: {VDH_ORANGE};
+    }}
+    h1, h2, h3 {{
+        color: {VDH_NAVY};
+    }}
+    .metric-card {{
+        background-color: white;
+        padding: 20px;
+        border-radius: 10px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }}
+
+    /* Item row styling with alternating colors */
+    .item-row {{
+        padding: 12px;
+        margin: 8px 0;
+        border-radius: 8px;
+        transition: all 0.15s;
+        border-left: 4px solid {VDH_NAVY};
+    }}
+    .item-row:hover {{
+        box-shadow: 0 4px 12px rgba(0,0,0,0.06);
+    }}
+    .item-row-even {{
+        background-color: #ffffff;
+    }}
+    .item-row-odd {{
+        background-color: #f8f9fa;
+    }}
+
+    /* Enhanced headers */
+    .list-header {{
+        font-size: 1.15em;
+        font-weight: 700;
+        color: {VDH_NAVY};
+        margin-bottom: 6px;
+    }}
+
+    /* Modern table styling */
+    .dataframe th {{
+        background-color: {VDH_NAVY} !important;
+        color: white !important;
+        padding: 10px !important;
+        font-weight: 600 !important;
+        font-size: 1.05em !important;
+    }}
+    .dataframe td {{
+        padding: 8px !important;
+    }}
+    .dataframe tr:nth-child(even) {{
+        background-color: #f8f9fa !important;
+    }}
+    .dataframe tr:hover {{
+        background-color: #e9f2fb !important;
+    }}
+
+    /* Notes container */
+    .notes-container {{
+        background-color: #f8f9fa;
+        border-left: 4px solid {VDH_ORANGE};
+        padding: 12px;
+        margin: 12px 0;
+        border-radius: 6px;
+    }}
+    .note-item {{
+        background-color: white;
+        padding: 10px;
+        margin: 8px 0;
+        border-radius: 6px;
+        border-left: 3px solid {VDH_NAVY};
+    }}
+    .note-header {{
+        font-weight: 600;
+        color: {VDH_NAVY};
+        font-size: 0.92em;
+    }}
+    .note-text {{
+        white-space: pre-wrap;
+        font-size: 0.95em;
+    }}
+</style>
+""", unsafe_allow_html=True)
+
+# ============================================================================ 
+# DATABASE CONNECTION FUNCTIONS
+# ============================================================================
+
+@st.cache_resource
+def get_connection_string():
+    """Get database connection parameters from environment or secrets"""
+    try:
+        server = st.secrets["database"]["server"]
+        database = st.secrets["database"]["database"]
+        username = st.secrets["database"]["username"]
+        password = st.secrets["database"]["password"]
+    except:
+        server = os.getenv("DB_SERVER")
+        database = os.getenv("DB_DATABASE")
+        username = os.getenv("DB_USERNAME")
+        password = os.getenv("DB_PASSWORD")
+    
+    return server, database, username, password
+
+def get_db_connection():
+    """
+    Returns a pyodbc.Connection with optimized settings for Azure SQL Database.
+    Priority:
+      1) Use full connection string from DB_CONN env var
+      2) Build DSN-less connection from secrets/env vars
+    """
+    conn_str = os.getenv("DB_CONN")
+    if conn_str:
+        try:
+            # Add timeout if not present
+            if "timeout" not in conn_str.lower():
+                conn_str += ";Connection Timeout=60;Login Timeout=60;"
+            return pyodbc.connect(conn_str, autocommit=True, timeout=60)
+        except Exception as e:
+            logger.exception("DB_CONN connect failed, falling back to built string")
+    
+    # Get connection parameters
+    server, database, username, password = get_connection_string()
+    
+    if not all([server, database, username, password]):
+        raise ValueError("Missing database connection parameters. Check your .streamlit/secrets.toml or environment variables.")
+    
+    # Azure SQL-specific: Append @servername if not present
+    if "@" not in username and "database.windows.net" in server:
+        # Extract server short name (e.g., "myserver" from "myserver.database.windows.net")
+        server_short = server.split('.')[0]
+        username = f"{username}@{server_short}"
+        logger.info(f"Modified username for Azure SQL: {username}")
+    
+    # Build connection string with Azure SQL optimizations
+    driver = "ODBC Driver 18 for SQL Server"
+    conn_str = (
+        f"DRIVER={{{driver}}};"
+        f"SERVER=tcp:{server},1433;"  # Explicitly use TCP and port 1433
+        f"DATABASE={database};"
+        f"UID={username};"
+        f"PWD={password};"
+        f"Encrypt=yes;"
+        f"TrustServerCertificate=no;"  # Changed to no for Azure
+        f"Connection Timeout=60;"  # Increased from 30 to 60 seconds
+        f"Login Timeout=60;"  # Added explicit login timeout
+        f"MultipleActiveResultSets=False;"  # Azure SQL best practice
+    )
+    
+    logger.info(f"Attempting connection to: {server}")
+    logger.info(f"Database: {database}")
+    logger.info(f"Username: {username}")
+    
+    try:
+        conn = pyodbc.connect(conn_str, autocommit=False, timeout=60)
+        logger.info("Database connection successful!")
+        return conn
+    except pyodbc.OperationalError as e:
+        error_msg = str(e)
+        logger.error(f"Connection failed: {error_msg}")
+        
+        # Provide helpful error messages
+        if "TCP Provider" in error_msg or "timeout" in error_msg.lower():
+            raise ConnectionError(
+                f"Connection timeout to {server}. "
+                f"Possible causes:\n"
+                f"1. Firewall blocking connection (check Azure SQL firewall rules)\n"
+                f"2. Server name incorrect\n"
+                f"3. Network connectivity issues\n"
+                f"4. Server is down or unreachable\n"
+                f"Original error: {error_msg}"
+            )
+        elif "Login failed" in error_msg:
+            raise ConnectionError(
+                f"Login failed for user '{username}'. "
+                f"Check your username and password.\n"
+                f"Original error: {error_msg}"
+            )
+        else:
+            raise ConnectionError(f"Database connection failed: {error_msg}")
+    except Exception as e:
+        logger.exception("Unexpected error connecting to database")
+        raise ConnectionError(f"Unexpected database connection error: {str(e)}")
+
+def execute_query(query: str, params: Optional[tuple] = None) -> Tuple[Optional[pd.DataFrame], Optional[str]]:
+    """Execute a SELECT query and return (DataFrame, None) on success or (None, error_message)"""
+    try:
+        conn = get_db_connection()
+        try:
+            if params:
+                df = pd.read_sql(query, conn, params=params)
+            else:
+                df = pd.read_sql(query, conn)
+            conn.close()
+            return df, None
+        except Exception as e:
+            try:
+                conn.close()
+            except:
+                pass
+            return None, f"Query error: {str(e)}"
+    except Exception as e:
+        return None, f"Connection error: {str(e)}"
+
+def execute_non_query(query: str, params: Optional[tuple] = None) -> Tuple[bool, Optional[str]]:
+    """Execute INSERT/UPDATE/DELETE. Returns (True, None) on success, or (False, error_message)"""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        try:
+            if params:
+                cursor.execute(query, params)
+            else:
+                cursor.execute(query)
+            conn.commit()
+            cursor.close()
+            conn.close()
+            return True, None
+        except Exception as e:
+            try:
+                conn.rollback()
+            except:
+                pass
+            try:
+                cursor.close()
+            except:
+                pass
+            try:
+                conn.close()
+            except:
+                pass
+            return False, f"Execution error: {str(e)}\n{traceback.format_exc()}"
+    except Exception as e:
+        return False, f"Connection error: {str(e)}"
+
+# ============================================================================ 
+# UTILITY FUNCTIONS
+# ============================================================================
+
+def safe_rerun():
+    """Cross-version safe replacement for st.experimental_rerun()/st.rerun()"""
+    try:
+        st.rerun()
+    except AttributeError:
+        try:
+            st.experimental_rerun()
+        except:
+            st.warning("Page refresh required. Please refresh manually.")
+
+def generate_ticket_number():
+    """Generate a unique ticket number"""
+    now = datetime.now()
+    return f"TKT-{now.year}-{now.month:02d}{now.day:02d}-{now.hour:02d}{now.minute:02d}{now.second:02d}"
+
+def generate_asset_tag():
+    """Generate a unique asset tag"""
+    now = datetime.now()
+    return f"COV-{now.year}{now.month:02d}{now.day:02d}-{now.hour:02d}{now.minute:02d}"
+
+def generate_procurement_number():
+    """Generate a unique procurement request number"""
+    now = datetime.now()
+    return f"PR-{now.year}-{now.month:02d}{now.day:02d}-{now.hour:02d}{now.minute:02d}"
+
+# ============================================================================ 
+# REPORT GENERATION FUNCTIONS
+# ============================================================================
+
+def generate_excel_report(df, report_title):
+    """Generate Excel report from DataFrame"""
+    if not HAS_EXCEL:
+        return None
+    
+    output = BytesIO()
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = report_title[:31]  # Excel sheet name limit
+    
+    # Header styling
+    header_fill = PatternFill(start_color="002855", end_color="002855", fill_type="solid")
+    header_font = Font(bold=True, color="FFFFFF")
+    
+    # Write headers
+    for col_num, column_title in enumerate(df.columns, 1):
+        cell = sheet.cell(row=1, column=col_num)
+        cell.value = column_title
+        cell.fill = header_fill
+        cell.font = header_font
+        cell.alignment = Alignment(horizontal="center")
+    
+    # Write data
+    for row_num, row_data in enumerate(df.values, 2):
+        for col_num, cell_value in enumerate(row_data, 1):
+            sheet.cell(row=row_num, column=col_num, value=cell_value)
+    
+    # Auto-adjust column widths
+    for column in sheet.columns:
+        max_length = 0
+        column = [cell for cell in column]
+        for cell in column:
+            try:
+                if len(str(cell.value)) > max_length:
+                    max_length = len(cell.value)
+            except:
+                pass
+        adjusted_width = min((max_length + 2), 50)
+        sheet.column_dimensions[column[0].column_letter].width = adjusted_width
+    
+    workbook.save(output)
+    output.seek(0)
+    return output
+
+def generate_pdf_report(df, report_title):
+    """Generate PDF report from DataFrame"""
+    if not HAS_PDF:
+        return None
+    
+    output = BytesIO()
+    doc = SimpleDocTemplate(output, pagesize=letter)
+    elements = []
+    
+    # Title
+    styles = getSampleStyleSheet()
+    title_style = ParagraphStyle(
+        'CustomTitle',
+        parent=styles['Heading1'],
+        fontSize=24,
+        textColor=colors.HexColor("#002855"),
+        spaceAfter=30,
+    )
+    title = Paragraph(report_title, title_style)
+    elements.append(title)
+    elements.append(Spacer(1, 12))
+    
+    # Convert DataFrame to table data
+    data = [df.columns.tolist()] + df.values.tolist()
+    
+    # Create table
+    table = Table(data)
+    table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor("#002855")),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, 0), 12),
+        ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+        ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
+        ('GRID', (0, 0), (-1, -1), 1, colors.black)
+    ]))
+    
+    elements.append(table)
+    doc.build(elements)
+    output.seek(0)
+    return output
+
+# ============================================================================ 
+# MAIN APPLICATION
+# ============================================================================
+
+# Sidebar Navigation
+st.sidebar.image("https://via.placeholder.com/200x80/002855/FFFFFF?text=VDH", width="stretch")
+st.sidebar.title("VDH Service Center")
+
+page = st.sidebar.selectbox("Navigate", [
+    "📊 Dashboard",
+    "🎫 Helpdesk Tickets",
+    "💻 Asset Management",
+    "🛒 Procurement Requests",
+    "🚗 Fleet Management",
+    "📈 Report Builder",
+    "🔌 Connection Test"
+])
+
+# ============================================================================ 
+# DASHBOARD PAGE
+# ============================================================================
+
+if page == "📊 Dashboard":
+    st.header("📊 Dashboard Overview")
+    
+    with st.spinner("Loading dashboard data..."):
+        # Get ticket statistics using EXACT database column names
+        # DB columns: ticket_id, status, priority, name, email, location, phone_number, 
+        # short_description, description, created_at, first_response_at, resolved_at, assigned_to
+        
+        ticket_stats_query = """
+            SELECT COUNT(*) as total_tickets FROM dbo.Tickets
+        """
+        stats_df, error = execute_query(ticket_stats_query)
+        
+        # Get detailed statistics using exact column names
+        status_query = """
+            SELECT 
+                status,
+                COUNT(*) as count
+            FROM dbo.Tickets
+            GROUP BY status
+        """
+        status_df, _ = execute_query(status_query)
+        
+        priority_query = """
+            SELECT 
+                priority,
+                COUNT(*) as count
+            FROM dbo.Tickets
+            GROUP BY priority
+        """
+        priority_df, _ = execute_query(priority_query)
+        
+        location_query = """
+            SELECT 
+                location,
+                COUNT(*) as count
+            FROM dbo.Tickets
+            GROUP BY location
+        """
+        location_df, _ = execute_query(location_query)
+        
+        # Get asset statistics using EXACT database column names
+        # DB columns: asset_id, asset_tag, type, category, model, serial, status, location,
+        # assigned_user, assigned_email, mac_address, ip_address, purchase_date,
+        # warranty_expiration, notes, created_at, updated_at
+        
+        asset_stats_query = "SELECT COUNT(*) as total_assets FROM dbo.Assets"
+        asset_df, _ = execute_query(asset_stats_query)
+        
+        # Assets by status and location using exact column names
+        asset_status_query = """
+            SELECT status, COUNT(*) as count
+            FROM dbo.Assets GROUP BY status
+        """
+        asset_status_df, _ = execute_query(asset_status_query)
+        
+        asset_location_query = """
+            SELECT location, COUNT(*) as count
+            FROM dbo.Assets GROUP BY location
+        """
+        asset_location_df, _ = execute_query(asset_location_query)
+        
+        # Get procurement statistics
+        proc_stats_query = "SELECT COUNT(*) as total_requests FROM dbo.Procurement_Requests"
+        proc_df, _ = execute_query(proc_stats_query)
+        
+        # Get fleet statistics
+        fleet_stats_query = "SELECT COUNT(*) as total_vehicles FROM dbo.vehicles"
+        fleet_df, _ = execute_query(fleet_stats_query)
+    
+    # Display metrics
+    st.subheader("Quick Statistics")
+    
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        st.markdown('<div class="metric-card">', unsafe_allow_html=True)
+        total_tickets = int(stats_df.iloc[0]['total_tickets']) if stats_df is not None and len(stats_df) > 0 else 0
+        st.metric("Total Tickets", total_tickets)
+        
+        # Show status breakdown
+        if status_df is not None and len(status_df) > 0:
+            for _, row in status_df.iterrows():
+                st.caption(f"{row['status']}: {int(row['count'])}")
+        st.markdown('</div>', unsafe_allow_html=True)
+    
+    with col2:
+        st.markdown('<div class="metric-card">', unsafe_allow_html=True)
+        total_assets = int(asset_df.iloc[0]['total_assets']) if asset_df is not None and len(asset_df) > 0 else 0
+        st.metric("Total Assets", total_assets)
+        
+        # Show status breakdown
+        if asset_status_df is not None and len(asset_status_df) > 0:
+            for _, row in asset_status_df.iterrows():
+                st.caption(f"{row['status']}: {int(row['count'])}")
+        st.markdown('</div>', unsafe_allow_html=True)
+    
+    with col3:
+        st.markdown('<div class="metric-card">', unsafe_allow_html=True)
+        total_proc = int(proc_df.iloc[0]['total_requests']) if proc_df is not None and len(proc_df) > 0 else 0
+        st.metric("Procurement Requests", total_proc)
+        st.markdown('</div>', unsafe_allow_html=True)
+    
+    with col4:
+        st.markdown('<div class="metric-card">', unsafe_allow_html=True)
+        total_fleet = int(fleet_df.iloc[0]['total_vehicles']) if fleet_df is not None and len(fleet_df) > 0 else 0
+        st.metric("Total Vehicles", total_fleet)
+        st.markdown('</div>', unsafe_allow_html=True)
+    
+    st.markdown("---")
+    
+    # Charts Row 1: Tickets
+    st.subheader("📊 Ticket Analytics")
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        st.write("**Tickets by Status**")
+        if status_df is not None and len(status_df) > 0:
+            fig = px.pie(status_df, values='count', names='status', 
+                        color_discrete_sequence=[VDH_NAVY, VDH_ORANGE, '#FFC857', '#4CAF50', '#E63946'])
+            st.plotly_chart(fig, config={"displayModeBar": False}, use_container_width=True)
+        else:
+            st.info("No ticket status data available")
+    
+    with col2:
+        st.write("**Tickets by Priority**")
+        if priority_df is not None and len(priority_df) > 0:
+            # Sort by priority level
+            priority_order = {'Low': 1, 'Medium': 2, 'High': 3, 'Critical': 4}
+            priority_df['sort_order'] = priority_df['priority'].map(priority_order)
+            priority_df = priority_df.sort_values('sort_order')
+            
+            fig = px.bar(priority_df, x='priority', y='count',
+                        color_discrete_sequence=[VDH_NAVY])
+            fig.update_layout(xaxis_title="Priority", yaxis_title="Count")
+            st.plotly_chart(fig, config={"displayModeBar": False}, use_container_width=True)
+        else:
+            st.info("No ticket priority data available")
+    
+    with col3:
+        st.write("**Tickets by Location**")
+        if location_df is not None and len(location_df) > 0:
+            fig = px.bar(location_df, x='location', y='count',
+                        color_discrete_sequence=[VDH_ORANGE])
+            fig.update_layout(xaxis_title="Location", yaxis_title="Count")
+            fig.update_xaxes(tickangle=-45)
+            st.plotly_chart(fig, config={"displayModeBar": False}, use_container_width=True)
+        else:
+            st.info("No ticket location data available")
+    
+    st.markdown("---")
+    
+    # Charts Row 2: Assets
+    st.subheader("💻 Asset Analytics")
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.write("**Assets by Status**")
+        if asset_status_df is not None and len(asset_status_df) > 0:
+            fig = px.pie(asset_status_df, values='count', names='status',
+                        color_discrete_sequence=[VDH_NAVY, '#4CAF50', '#FFC857'])
+            st.plotly_chart(fig, config={"displayModeBar": False}, use_container_width=True)
+        else:
+            st.info("No asset status data available")
+    
+    with col2:
+        st.write("**Assets by Location**")
+        if asset_location_df is not None and len(asset_location_df) > 0:
+            fig = px.bar(asset_location_df, x='location', y='count',
+                        color_discrete_sequence=[VDH_NAVY])
+            fig.update_layout(xaxis_title="Location", yaxis_title="Count")
+            fig.update_xaxes(tickangle=-45)
+            st.plotly_chart(fig, config={"displayModeBar": False}, use_container_width=True)
+        else:
+            st.info("No asset location data available")
+
+# ============================================================================ 
+# HELPDESK TICKETS PAGE
+# ============================================================================
+
+elif page == "🎫 Helpdesk Tickets":
+    st.header("🎫 Helpdesk Tickets")
+    
+    # Initialize session states
+    if 'show_create_ticket' not in st.session_state:
+        st.session_state.show_create_ticket = False
+    if 'view_ticket_id' not in st.session_state:
+        st.session_state.view_ticket_id = None
+    
+    # Action buttons
+    col1, col2, col3 = st.columns([2, 1, 1])
+    with col1:
+        if st.button("➕ Create New Ticket"):
+            st.session_state.show_create_ticket = True
+            st.session_state.view_ticket_id = None
+            safe_rerun()
+    
+    # Create Ticket Form
+    if st.session_state.show_create_ticket:
+        st.markdown("---")
+        st.subheader("Create New Ticket")
+        
+        with st.form("create_ticket_form"):
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                customer_name = st.text_input("Customer Name *", placeholder="John Doe")
+                customer_email = st.text_input("Customer Email *", placeholder="john.doe@vdh.virginia.gov")
+                customer_phone = st.text_input("Customer Phone", placeholder="(804) 555-1234")
+                vdh_location = st.selectbox("VDH Location *", [
+                    "Petersburg", "Hopewell", "Dinwiddie", "Surry",
+                    "Greensville/Emporia", "Prince George", "Sussex"
+                ])
+            
+            with col2:
+                ticket_type = st.selectbox("Ticket Type *", [
+                    "Technical issue", "Hardware issue", "Software issue",
+                    "Network issue", "Access request", "Training request", "Other"
+                ])
+                ticket_priority = st.selectbox("Priority *", [
+                    "Low", "Medium", "High", "Critical"
+                ])
+                ticket_subject = st.text_input("Subject *", placeholder="Brief description")
+            
+            ticket_description = st.text_area("Description *", 
+                placeholder="Detailed description of the issue...",
+                height=150)
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                submit_button = st.form_submit_button("✅ Create Ticket", )
+            with col2:
+                cancel_button = st.form_submit_button("❌ Cancel", )
+            
+            if submit_button:
+                if not all([customer_name, customer_email, vdh_location, ticket_type, 
+                           ticket_priority, ticket_subject, ticket_description]):
+                    st.error("Please fill in all required fields (*)")
+                else:
+                    # Insert ticket using EXACT database column names
+                    # DB columns: ticket_id, status, priority, name, email, location, phone_number, 
+                    # short_description, description, created_at, first_response_at, resolved_at, assigned_to
+                    insert_query = """
+                        INSERT INTO dbo.Tickets (
+                            name, email, phone_number, location, short_description, 
+                            description, status, priority, created_at
+                        ) VALUES (?, ?, ?, ?, ?, ?, 'New', ?, GETDATE())
+                    """
+                    success, error = execute_non_query(insert_query, (
+                        customer_name, customer_email, customer_phone,
+                        vdh_location, ticket_subject, ticket_description,
+                        ticket_priority
+                    ))
+                    
+                    if success:
+                        st.success(f"✅ Ticket created successfully!")
+                        st.session_state.show_create_ticket = False
+                        safe_rerun()
+                    else:
+                        st.error(f"Error creating ticket: {error}")
+            
+            if cancel_button:
+                st.session_state.show_create_ticket = False
+                safe_rerun()
+    
+    # View Ticket Details
+    if st.session_state.view_ticket_id:
+        st.markdown("---")
+        if st.button("← Back to Ticket List"):
+            st.session_state.view_ticket_id = None
+            safe_rerun()
+        
+        tid = st.session_state.view_ticket_id
+        ticket_query = f"SELECT * FROM dbo.Tickets WHERE ticket_id = {tid}"
+        ticket_df, error = execute_query(ticket_query)
+        
+        if error or ticket_df is None or len(ticket_df) == 0:
+            st.error("Ticket not found or error loading ticket")
+            if error:
+                st.error(f"Error: {error}")
+            st.session_state.view_ticket_id = None
+        else:
+            ticket = ticket_df.iloc[0]
+            
+            # Display using EXACT column names from database
+            col1, col2, col3 = st.columns([2, 1, 1])
+            with col1:
+                ticket_id = ticket.get('ticket_id', 'N/A')
+                st.subheader(f"Ticket #{ticket_id}")
+            with col2:
+                status = ticket.get('status', 'N/A')
+                status_colors = {
+                    'New': '🟢', 'Open': '🟢', 'In Progress': '🟡', 
+                    'On Hold': '🟠', 'Resolved': '✅', 'Closed': '⚫'
+                }
+                st.write(f"{status_colors.get(status, '⚪')} Status: **{status}**")
+            with col3:
+                priority = ticket.get('priority', 'Normal')
+                priority_colors = {
+                    'Low': '🟢', 'Medium': '🟡', 'High': '🟠', 'Critical': '🔴'
+                }
+                st.write(f"{priority_colors.get(priority, '⚪')} Priority: **{priority}**")
+            
+            st.markdown("---")
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                customer = ticket.get('name', 'N/A')
+                email = ticket.get('email', 'N/A')
+                phone = ticket.get('phone_number', '')
+                location = ticket.get('location', 'N/A')
+                
+                st.write(f"**Customer:** {customer}")
+                st.write(f"**Email:** {email}")
+                if phone:
+                    st.write(f"**Phone:** {phone}")
+                st.write(f"**Location:** {location}")
+            
+            with col2:
+                created = ticket.get('created_at', 'N/A')
+                first_response = ticket.get('first_response_at', 'N/A')
+                resolved = ticket.get('resolved_at', 'N/A')
+                
+                st.write(f"**Created:** {created}")
+                if first_response and first_response != 'N/A':
+                    st.write(f"**First Response:** {first_response}")
+                if resolved and resolved != 'N/A':
+                    st.write(f"**Resolved:** {resolved}")
+            
+            st.markdown("---")
+            st.subheader("Subject")
+            subject = ticket.get('short_description', 'N/A')
+            st.write(subject)
+            
+            st.subheader("Description")
+            description = ticket.get('description', 'N/A')
+            st.write(description)
+            
+            # Update Status (REPLACED WITH REQUIRED NOTES + AUTO-RETURN)
+            st.markdown("---")
+            st.subheader("Update Ticket")
+            
+            # Use exact column names from database
+            with st.form("update_ticket_form"):
+                col1, col2 = st.columns(2)
+                with col1:
+                    current_status = str(ticket['status'])
+                    status_options = ['New', 'Open', 'In Progress', 'On Hold', 'Waiting Customer Response', 'Resolved', 'Closed']
+                    try:
+                        status_index = status_options.index(current_status)
+                    except ValueError:
+                        status_index = 0
+                    new_status = st.selectbox("Status", status_options, index=status_index)
+                
+                with col2:
+                    current_priority = str(ticket['priority'])
+                    priority_options = ['Low', 'Medium', 'High', 'Critical']
+                    try:
+                        priority_index = priority_options.index(current_priority)
+                    except ValueError:
+                        priority_index = 1
+                    new_priority = st.selectbox("Priority", priority_options, index=priority_index)
+                
+                notes = st.text_area("Add Notes *", placeholder="Enter update notes (required)...", height=100)
+                
+                if st.form_submit_button("💾 Update Ticket"):
+                    if not notes or notes.strip() == "":
+                        st.error("⚠️ Please add notes describing the update")
+                    else:
+                        # Update using EXACT database column names
+                        update_query = """
+                            UPDATE dbo.Tickets
+                            SET status = ?, priority = ?
+                            WHERE ticket_id = ?
+                        """
+                        success, qerr = execute_non_query(update_query, (new_status, new_priority, tid))
+                        
+                        if success:
+                            # Insert note into Ticket_Notes table
+                            note_query = """
+                                INSERT INTO dbo.Ticket_Notes (ticket_id, note_text, note_type, created_by, created_at)
+                                VALUES (?, ?, ?, ?, GETDATE())
+                            """
+                            
+                            # Determine note type based on what changed
+                            note_type = "Update"
+                            if new_status != current_status and new_priority != current_priority:
+                                note_type = "Status & Priority Update"
+                            elif new_status != current_status:
+                                note_type = "Status Update"
+                            elif new_priority != current_priority:
+                                note_type = "Priority Update"
+                            
+                            # Build detailed note text
+                            note_text = f"Status: {current_status} → {new_status}\nPriority: {current_priority} → {new_priority}\n\nNotes: {notes}"
+                            
+                            note_success, note_error = execute_non_query(note_query, (tid, note_text, note_type, "System User"))
+                            
+                            if note_success:
+                                st.success("✅ Ticket updated successfully!")
+                                # Auto-return to ticket list
+                                st.session_state.view_ticket_id = None
+                                safe_rerun()
+                            else:
+                                st.warning(f"Ticket updated but note not saved: {note_error}")
+                                st.info("Make sure Ticket_Notes table exists in database")
+                        else:
+                            st.error(f"❌ Error updating ticket: {qerr}")
+            
+            # Display Ticket Notes/Log
+            st.markdown("---")
+            st.subheader("📋 Ticket History")
+            
+            notes_query = """
+                SELECT note_id, note_text, note_type, created_by, created_at
+                FROM dbo.Ticket_Notes
+                WHERE ticket_id = ?
+                ORDER BY created_at DESC
+            """
+            notes_df, notes_error = execute_query(notes_query, (tid,))
+            
+            if notes_error:
+                st.warning("⚠️ Could not load ticket history.")
+                st.info("Make sure you've run the database update script to create the Ticket_Notes table.")
+                with st.expander("Show Error"):
+                    st.code(notes_error)
+            elif notes_df is None or len(notes_df) == 0:
+                st.info("No notes or history for this ticket yet. Add the first update above!")
+            else:
+                st.markdown('<div class="notes-container">', unsafe_allow_html=True)
+                for _, note in notes_df.iterrows():
+                    created_date = note['created_at']
+                    st.markdown(f"""
+                    <div class="note-item">
+                        <div class="note-header">
+                            {note['note_type']} • {note['created_by']} • {created_date}
+                        </div>
+                        <div class="note-text">{note['note_text']}</div>
+                    </div>
+                    """, unsafe_allow_html=True)
+                st.markdown('</div>', unsafe_allow_html=True)
+    
+    # Ticket List (when not creating or viewing)
+    if not st.session_state.show_create_ticket and not st.session_state.view_ticket_id:
+        st.markdown("---")
+        st.subheader("All Tickets")
+        
+        # Filters
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            filter_status = st.selectbox("Filter by Status", 
+                ["All", "Open", "In Progress", "On Hold", "Resolved", "Closed"])
+        with col2:
+            filter_priority = st.selectbox("Filter by Priority",
+                ["All", "Low", "Medium", "High", "Critical"])
+        with col3:
+            filter_location = st.selectbox("Filter by Location",
+                ["All", "Petersburg", "Hopewell", "Dinwiddie", "Surry",
+                 "Greensville/Emporia", "Prince George", "Sussex"])
+        with col4:
+            filter_type = st.selectbox("Filter by Type",
+                ["All", "Technical issue", "Hardware issue", "Software issue",
+                 "Network issue", "Access request", "Training request", "Other"])
+        
+        # Build query using EXACT database column names
+        query = "SELECT * FROM dbo.Tickets WHERE 1=1"
+        if filter_status != "All":
+            query += f" AND status = '{filter_status}'"
+        if filter_priority != "All":
+            query += f" AND priority = '{filter_priority}'"
+        if filter_location != "All":
+            query += f" AND location = '{filter_location}'"
+        # omit Type filter to avoid schema issues; users can verify via Connection Test
+        query += " ORDER BY ticket_id DESC"  # Order by ID, most recent first
+        
+        tickets_df, error = execute_query(query)
+        
+        if error:
+            st.error(f"Error loading tickets: {error}")
+            st.info("💡 Go to Connection Test page and click 'Show Table Columns' to see the actual column names in your database.")
+        elif tickets_df is None or len(tickets_df) == 0:
+            st.info("No tickets found. Click 'Create New Ticket' to add one!")
+        else:
+            st.write(f"Found {len(tickets_df)} tickets")
+            
+            # Display tickets - show modern styled rows with alternating backgrounds
+            for idx, ticket in tickets_df.iterrows():
+                row_class = "item-row-even" if idx % 2 == 0 else "item-row-odd"
+                st.markdown(f'<div class="item-row {row_class}">', unsafe_allow_html=True)
+                col1, col2, col3, col4 = st.columns([3, 2, 1, 1])
+                
+                with col1:
+                    ticket_id = ticket.get('ticket_id', 'N/A')
+                    subject = ticket.get('short_description', 'N/A')
+                    st.markdown(f'<div class="list-header">Ticket #{ticket_id}</div>', unsafe_allow_html=True)
+                    st.write(subject)
+                    customer = ticket.get('name', 'N/A')
+                    location = ticket.get('location', 'N/A')
+                    st.caption(f"{customer} • {location}")
+                
+                with col2:
+                    status = ticket.get('status', 'N/A')
+                    st.write(f"**Status:** {status}")
+                    st.caption(f"Created: {ticket.get('created_at', 'N/A')}")
+                
+                with col3:
+                    priority = ticket.get('priority', 'Normal')
+                    priority_colors = {'Low': '🟢', 'Medium': '🟡', 'High': '🟠', 'Critical': '🔴'}
+                    st.write(f"{priority_colors.get(priority, '⚪')} {priority}")
+                
+                with col4:
+                    tid = ticket.get('ticket_id')
+                    if st.button("View", key=f"view_{idx}_{tid}"):
+                        st.session_state.view_ticket_id = int(tid)
+                        safe_rerun()
+                
+                st.markdown('</div>', unsafe_allow_html=True)
+
+# ============================================================================ 
+# ASSET MANAGEMENT PAGE
+# ============================================================================
+
+elif page == "💻 Asset Management":
+    st.header("💻 Asset Management")
+    
+    # Initialize session states (ensured earlier in file)
+    if 'show_create_asset' not in st.session_state:
+        st.session_state.show_create_asset = False
+    if 'view_asset_id' not in st.session_state:
+        st.session_state.view_asset_id = None
+    
+    # Action buttons
+    col1, col2 = st.columns([2, 1])
+    with col1:
+        if st.button("➕ Add New Asset"):
+            st.session_state.show_create_asset = True
+            st.session_state.view_asset_id = None
+            safe_rerun()
+    
+    # Create Asset Form
+    if st.session_state.show_create_asset:
+        st.markdown("---")
+        st.subheader("Add New Asset")
+        
+        with st.form("create_asset_form"):
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                asset_tag = st.text_input("Asset Tag *", value=generate_asset_tag())
+                asset_type = st.selectbox("Asset Type *", [
+                    "Desktop Computer", "Laptop", "Monitor", "Printer",
+                    "Phone", "Tablet", "Network Equipment", "Server", "Other"
+                ])
+                make_model = st.text_input("Make/Model *", placeholder="Dell Optiplex 7090")
+                serial_number = st.text_input("Serial Number *", placeholder="ABC123XYZ")
+            
+            with col2:
+                status = st.selectbox("Status *", ["Deployed", "Non-Deployed", "Surplus"])
+                location = st.selectbox("Location *", [
+                    "Petersburg", "Hopewell", "Dinwiddie", "Surry",
+                    "Greensville/Emporia", "Prince George", "Sussex"
+                ])
+                assigned_to = st.text_input("Assigned To", placeholder="Employee name")
+                purchase_date = st.date_input("Purchase Date")
+            
+            notes = st.text_area("Notes", placeholder="Additional information...")
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                submit_button = st.form_submit_button("✅ Add Asset")
+            with col2:
+                cancel_button = st.form_submit_button("❌ Cancel")
+            
+            if submit_button:
+                if not all([asset_tag, asset_type, make_model, serial_number, status, location]):
+                    st.error("Please fill in all required fields (*)")
+                else:
+                    # Insert asset using EXACT database column names
+                    insert_query = """
+                        INSERT INTO dbo.Assets (
+                            asset_tag, type, model, serial,
+                            status, location, assigned_user, purchase_date, notes,
+                            created_at, updated_at
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, GETDATE(), GETDATE())
+                    """
+                    success, error = execute_non_query(insert_query, (
+                        asset_tag, asset_type, make_model, serial_number,
+                        status, location, assigned_to or None, purchase_date, notes or None
+                    ))
+                    
+                    if success:
+                        st.success(f"✅ Asset {asset_tag} added successfully!")
+                        st.session_state.show_create_asset = False
+                        safe_rerun()
+                    else:
+                        st.error(f"Error adding asset: {error}")
+            
+            if cancel_button:
+                st.session_state.show_create_asset = False
+                safe_rerun()
+    
+    # Asset List
+    if not st.session_state.show_create_asset and not st.session_state.view_asset_id:
+        st.markdown("---")
+        st.subheader("Asset Inventory")
+        
+        # Filters
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            filter_status = st.selectbox("Filter by Status", 
+                ["All", "Deployed", "Non-Deployed", "Surplus"])
+        with col2:
+            filter_type = st.selectbox("Filter by Type",
+                ["All", "Desktop Computer", "Laptop", "Monitor", "Printer",
+                 "Phone", "Tablet", "Network Equipment", "Server", "Other"])
+        with col3:
+            filter_location = st.selectbox("Filter by Location",
+                ["All", "Petersburg", "Hopewell", "Dinwiddie", "Surry",
+                 "Greensville/Emporia", "Prince George", "Sussex"])
+        
+        # Build query using EXACT database column names
+        query = "SELECT * FROM dbo.Assets WHERE 1=1"
+        if filter_status != "All":
+            query += f" AND status = '{filter_status}'"
+        if filter_type != "All":
+            query += f" AND type = '{filter_type}'"
+        if filter_location != "All":
+            query += f" AND location = '{filter_location}'"
+        query += " ORDER BY asset_id DESC"  # Order by ID, most recent first
+        
+        assets_df, error = execute_query(query)
+        
+        if error:
+            st.error(f"Error loading assets: {error}")
+            st.info("💡 Go to Connection Test page and click 'Show Table Columns' to see the actual column names in your database.")
+        elif assets_df is None or len(assets_df) == 0:
+            st.info("No assets found")
+        else:
+            st.write(f"Found {len(assets_df)} assets")
+            
+            # Display with modern styling and view buttons (alternating rows)
+            for idx, asset in assets_df.iterrows():
+                row_class = "item-row-even" if idx % 2 == 0 else "item-row-odd"
+                st.markdown(f'<div class="item-row {row_class}">', unsafe_allow_html=True)
+                
+                col1, col2, col3, col4, col5 = st.columns([2, 2, 2, 1, 1])
+                with col1:
+                    asset_id = asset.get('asset_id', 'N/A')
+                    asset_tag = asset.get('asset_tag', 'N/A')
+                    st.markdown(f'<div class="list-header">{asset_tag}</div>', unsafe_allow_html=True)
+                    st.caption(f"ID: {asset_id}")
+                with col2:
+                    st.write(f"**Type:** {asset.get('type', 'N/A')}")
+                    st.caption(asset.get('model', ''))
+                with col3:
+                    location = asset.get('location', 'N/A')
+                    assigned = asset.get('assigned_user', 'Unassigned')
+                    st.write(f"📍 {location}")
+                    st.caption(f"👤 {assigned}")
+                with col4:
+                    status = asset.get('status', 'N/A')
+                    status_colors = {'Deployed': '🟢', 'Non-Deployed': '🟡', 'Surplus': '🟠'}
+                    st.write(f"{status_colors.get(status, '⚪')} {status}")
+                with col5:
+                    aid = asset.get('asset_id')
+                    if st.button("View", key=f"view_asset_{idx}_{aid}"):
+                        st.session_state.view_asset_id = int(aid)
+                        safe_rerun()
+                
+                st.markdown('</div>', unsafe_allow_html=True)
+    
+    # View Asset Details and Update (NEW SECTION - ASSET_UPDATE_CODE.md logic)
+    if st.session_state.view_asset_id:
+        st.markdown("---")
+        if st.button("← Back to Asset List"):
+            st.session_state.view_asset_id = None
+            safe_rerun()
+        
+        aid = st.session_state.view_asset_id
+        asset_query = f"SELECT * FROM dbo.Assets WHERE asset_id = {aid}"
+        asset_df, asset_err = execute_query(asset_query)
+        
+        if asset_err or asset_df is None or len(asset_df) == 0:
+            st.error("Asset not found or error loading asset")
+            if asset_err:
+                st.error(asset_err)
+            st.session_state.view_asset_id = None
+        else:
+            asset = asset_df.iloc[0]
+            
+            # Header with asset info
+            col1, col2, col3 = st.columns([2, 1, 1])
+            with col1:
+                asset_tag = asset.get('asset_tag', 'N/A')
+                st.subheader(f"Asset: {asset_tag}")
+            with col2:
+                asset_type = asset.get('type', 'N/A')
+                st.write(f"**Type:** {asset_type}")
+            with col3:
+                status = asset.get('status', 'N/A')
+                status_colors = {
+                    'Deployed': '🟢', 'Non-Deployed': '🟡', 'Surplus': '🟠', 'Unaccounted': '🔴'
+                }
+                st.write(f"{status_colors.get(status, '⚪')} **{status}**")
+            
+            st.markdown("---")
+            
+            # Display asset details in two columns
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.write("### Hardware Details")
+                st.write(f"**Model:** {asset.get('model', 'N/A')}")
+                st.write(f"**Serial Number:** {asset.get('serial', 'N/A')}")
+                st.write(f"**Category:** {asset.get('category', 'N/A')}")
+                
+                st.write("### Location & Assignment")
+                st.write(f"**Location:** {asset.get('location', 'N/A')}")
+                st.write(f"**Assigned User:** {asset.get('assigned_user', 'Unassigned')}")
+                st.write(f"**Assigned Email:** {asset.get('assigned_email', 'N/A')}")
+            
+            with col2:
+                st.write("### Network Information")
+                st.write(f"**MAC Address:** {asset.get('mac_address', 'N/A')}")
+                st.write(f"**IP Address:** {asset.get('ip_address', 'N/A')}")
+                
+                st.write("### Warranty & Purchase")
+                st.write(f"**Purchase Date:** {asset.get('purchase_date', 'N/A')}")
+                st.write(f"**Warranty Expires:** {asset.get('warranty_expiration', 'N/A')}")
+                
+                st.write("### Timestamps")
+                st.write(f"**Created:** {asset.get('created_at', 'N/A')}")
+                st.write(f"**Last Updated:** {asset.get('updated_at', 'N/A')}")
+            
+            # Show existing notes if any (legacy single column)
+            if asset.get('notes'):
+                st.write("### Notes")
+                st.info(asset.get('notes'))
+            
+            # Update Asset Form
+            st.markdown("---")
+            st.subheader("Update Asset")
+            
+            with st.form("update_asset_form"):
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    current_status = asset.get('status', 'In-Stock')
+                    status_options = ["Deployed", "In-Stock", "Surplus", "Unaccounted"]
+                    try:
+                        status_index = status_options.index(current_status)
+                    except Exception:
+                        status_index = 1
+                    new_status = st.selectbox("Status", status_options, index=status_index)
+                    
+                    current_location = asset.get('location', 'Petersburg')
+                    location_options = ["Petersburg", "Hopewell", "Dinwiddie", "Surry", 
+                                      "Greensville/Emporia", "Prince George", "Sussex"]
+                    try:
+                        location_index = location_options.index(current_location)
+                    except Exception:
+                        location_index = 0
+                    new_location = st.selectbox("Location", location_options, index=location_index)
+                
+                with col2:
+                    new_assigned_user = st.text_input("Assigned User", 
+                                                      value=asset.get('assigned_user', ''))
+                    new_assigned_email = st.text_input("Assigned Email", 
+                                                       value=asset.get('assigned_email', ''))
+                
+                col1, col2 = st.columns(2)
+                with col1:
+                    new_mac = st.text_input("MAC Address", value=asset.get('mac_address', ''))
+                with col2:
+                    new_ip = st.text_input("IP Address", value=asset.get('ip_address', ''))
+                
+                update_notes = st.text_area("Update Notes *", 
+                    placeholder="Enter notes about this update (required)...", 
+                    height=100)
+                
+                if st.form_submit_button("💾 Update Asset"):
+                    if not update_notes or update_notes.strip() == "":
+                        st.error("⚠️ Please add notes describing the update")
+                    else:
+                        # Update asset in database
+                        update_query = """
+                            UPDATE dbo.Assets
+                            SET status = ?, location = ?, assigned_user = ?, 
+                                assigned_email = ?, mac_address = ?, ip_address = ?,
+                                updated_at = GETDATE()
+                            WHERE asset_id = ?
+                        """
+                        success, error = execute_non_query(update_query, (
+                            new_status, new_location, 
+                            new_assigned_user if new_assigned_user else None,
+                            new_assigned_email if new_assigned_email else None,
+                            new_mac if new_mac else None,
+                            new_ip if new_ip else None,
+                            st.session_state.view_asset_id
+                        ))
+                        
+                        if success:
+                            # Insert note into Asset_Notes table
+                            note_query = """
+                                INSERT INTO dbo.Asset_Notes (asset_id, note_text, note_type, created_by, created_at)
+                                VALUES (?, ?, ?, ?, GETDATE())
+                            """
+                            
+                            # Build detailed note text
+                            changes = []
+                            if new_status != current_status:
+                                changes.append(f"Status: {current_status} → {new_status}")
+                            if new_location != current_location:
+                                changes.append(f"Location: {current_location} → {new_location}")
+                            if new_assigned_user != asset.get('assigned_user', ''):
+                                changes.append(f"Assigned User: {asset.get('assigned_user', 'None')} → {new_assigned_user}")
+                            
+                            change_summary = "\n".join(changes) if changes else "Minor update"
+                            note_text = f"{change_summary}\n\nNotes: {update_notes}"
+                            
+                            note_success, note_error = execute_non_query(note_query, (
+                                st.session_state.view_asset_id,
+                                note_text,
+                                "Asset Update",
+                                "System User"  # TODO: Replace with actual username
+                            ))
+                            
+                            if note_success:
+                                st.success("✅ Asset updated successfully!")
+                                # Auto-return to asset list
+                                st.session_state.view_asset_id = None
+                                safe_rerun()
+                            else:
+                                st.warning(f"Asset updated but note not saved: {note_error}")
+                                st.info("Make sure Asset_Notes table exists in database")
+                        else:
+                            st.error(f"❌ Error updating asset: {error}")
+            
+            # Display Asset History
+            st.markdown("---")
+            st.subheader("📋 Asset History")
+            
+            notes_query = """
+                SELECT note_id, note_text, note_type, created_by, created_at
+                FROM dbo.Asset_Notes
+                WHERE asset_id = ?
+                ORDER BY created_at DESC
+            """
+            notes_df, notes_error = execute_query(notes_query, (st.session_state.view_asset_id,))
+            
+            if notes_error:
+                st.warning("⚠️ Could not load asset history.")
+                st.info("Make sure you've run the database update script to create the Asset_Notes table.")
+                with st.expander("Show Error"):
+                    st.code(notes_error)
+            elif notes_df is None or len(notes_df) == 0:
+                st.info("No history for this asset yet. Add the first update above!")
+            else:
+                st.markdown('<div class="notes-container">', unsafe_allow_html=True)
+                for _, note in notes_df.iterrows():
+                    created_date = note['created_at']
+                    st.markdown(f"""
+                    <div class="note-item">
+                        <div class="note-header">
+                            {note['note_type']} • {note['created_by']} • {created_date}
+                        </div>
+                        <div class="note-text">{note['note_text']}</div>
+                    </div>
+                    """, unsafe_allow_html=True)
+                st.markdown('</div>', unsafe_allow_html=True)
+
+# ============================================================================ 
+# PROCUREMENT REQUESTS PAGE
+# ============================================================================
+
+elif page == "🛒 Procurement Requests":
+    st.header("🛒 Procurement Requests")
+    
+    # Initialize session states
+    if 'show_create_procurement' not in st.session_state:
+        st.session_state.show_create_procurement = False
+    if 'view_procurement_id' not in st.session_state:
+        st.session_state.view_procurement_id = None
+    if 'procurement_items' not in st.session_state:
+        st.session_state.procurement_items = []
+    
+    # Action buttons
+    col1, col2 = st.columns([2, 1])
+    with col1:
+        if st.button("➕ Complete Requisition Form"):
+            st.session_state.show_create_procurement = True
+            st.session_state.view_procurement_id = None
+            st.session_state.procurement_items = []
+            safe_rerun()
+    
+    # Create Procurement Form
+    if st.session_state.show_create_procurement:
+        st.markdown("---")
+        st.subheader("Complete Procurement Requisition")
+        
+        with st.form("create_procurement_form"):
+            request_number = generate_procurement_number()
+            st.write(f"**Request Number:** {request_number}")
+            
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.subheader("Requester Information")
+                requester_name = st.text_input("Name *", placeholder="John Doe")
+                requester_email = st.text_input("Email *", placeholder="john.doe@vdh.virginia.gov")
+                requester_phone = st.text_input("Phone", placeholder="(804) 555-1234")
+                location = st.selectbox("Location *", [
+                    "Petersburg", "Hopewell", "Dinwiddie", "Surry",
+                    "Greensville/Emporia", "Prince George", "Sussex"
+                ])
+                department = st.text_input("Department", placeholder="IT Department")
+            
+            with col2:
+                st.subheader("Financial Information")
+                cst_code = st.text_input("CST Code", placeholder="12345")
+                coa_code = st.text_input("COA Code", placeholder="67890")
+                prog_code = st.text_input("PROG Code", placeholder="ABC")
+                fund_code = st.text_input("FUND Code", placeholder="XYZ")
+                priority = st.selectbox("Priority *", ["Normal", "High", "Urgent"])
+            
+            st.markdown("---")
+            st.subheader("Line Items")
+            
+            # Add item section
+            col1, col2, col3, col4 = st.columns([3, 1, 1, 1])
+            with col1:
+                item_description = st.text_input("Item Description", key="item_desc")
+            with col2:
+                item_qty = st.number_input("Quantity", min_value=1, value=1, key="item_qty")
+            with col3:
+                item_price = st.number_input("Unit Price ($)", min_value=0.0, value=0.0, step=0.01, key="item_price")
+            with col4:
+                if st.form_submit_button("Add Item"):
+                    if item_description and item_price > 0:
+                        st.session_state.procurement_items.append({
+                            'description': item_description,
+                            'quantity': item_qty,
+                            'unit_price': item_price,
+                            'total': item_qty * item_price
+                        })
+                        safe_rerun()
+            
+            # Display added items
+            if st.session_state.procurement_items:
+                st.write("**Items to be ordered:**")
+                for idx, item in enumerate(st.session_state.procurement_items):
+                    col1, col2, col3, col4, col5 = st.columns([3, 1, 1, 1, 1])
+                    with col1:
+                        st.write(item['description'])
+                    with col2:
+                        st.write(f"Qty: {item['quantity']}")
+                    with col3:
+                        st.write(f"${item['unit_price']:.2f}")
+                    with col4:
+                        st.write(f"${item['total']:.2f}")
+                    with col5:
+                        if st.form_submit_button("Remove", key=f"remove_{idx}"):
+                            st.session_state.procurement_items.pop(idx)
+                            safe_rerun()
+                
+                total_amount = sum(item['total'] for item in st.session_state.procurement_items)
+                st.write(f"**Total Amount: ${total_amount:.2f}**")
+            
+            st.markdown("---")
+            justification = st.text_area("Justification *", 
+                placeholder="Explain why this purchase is necessary...",
+                height=150)
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                submit_button = st.form_submit_button("✅ Submit Request")
+            with col2:
+                cancel_button = st.form_submit_button("❌ Cancel")
+            
+            if submit_button:
+                if not all([requester_name, requester_email, location, priority, justification]):
+                    st.error("Please fill in all required fields (*)")
+                elif not st.session_state.procurement_items:
+                    st.error("Please add at least one item")
+                else:
+                    total_amount = sum(item['total'] for item in st.session_state.procurement_items)
+                    
+                    # Insert procurement request
+                    insert_query = """
+                        INSERT INTO dbo.Procurement_Requests (
+                            request_number, requester_name, requester_email, requester_phone,
+                            location, department, cst_code, coa_code, prog_code, fund_code,
+                            priority, total_amount, justification, status,
+                            created_at, updated_at
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft', GETDATE(), GETDATE())
+                    """
+                    
+                    success, error = execute_non_query(insert_query, (
+                        request_number, requester_name, requester_email, requester_phone or None,
+                        location, department or None, cst_code or None, coa_code or None,
+                        prog_code or None, fund_code or None, priority, total_amount, justification
+                    ))
+                    
+                    if success:
+                        st.success(f"✅ Procurement request {request_number} created successfully!")
+                        st.session_state.show_create_procurement = False
+                        st.session_state.procurement_items = []
+                        safe_rerun()
+                    else:
+                        st.error(f"Error creating request: {error}")
+            
+            if cancel_button:
+                st.session_state.show_create_procurement = False
+                st.session_state.procurement_items = []
+                safe_rerun()
+    
+    # Procurement List
+    if not st.session_state.show_create_procurement and not st.session_state.view_procurement_id:
+        st.markdown("---")
+        st.subheader("All Procurement Requests")
+        
+        # Filters
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            filter_status = st.selectbox("Filter by Status",
+                ["All", "draft", "pending_level1", "pending_level2", "approved", "rejected"])
+        with col2:
+            filter_priority = st.selectbox("Filter by Priority",
+                ["All", "Normal", "High", "Urgent"])
+        with col3:
+            filter_location = st.selectbox("Filter by Location",
+                ["All", "Petersburg", "Hopewell", "Dinwiddie", "Surry",
+                 "Greensville/Emporia", "Prince George", "Sussex"])
+        
+        # Build query - explicitly select columns and convert datetime to avoid DATETIMEOFFSET issues
+        query = """
+            SELECT 
+                request_id,
+                request_number,
+                requester_name,
+                requester_email,
+                requester_phone,
+                location,
+                department,
+                cst_code,
+                coa_code,
+                prog_code,
+                fund_code,
+                priority,
+                total_amount,
+                justification,
+                status,
+                CONVERT(VARCHAR(50), created_at, 127) as created_at,
+                CONVERT(VARCHAR(50), updated_at, 127) as updated_at
+            FROM dbo.Procurement_Requests 
+            WHERE 1=1
+        """
+        if filter_status != "All":
+            query += f" AND status = '{filter_status}'"
+        if filter_priority != "All":
+            query += f" AND priority = '{filter_priority}'"
+        if filter_location != "All":
+            query += f" AND location = '{filter_location}'"
+        query += " ORDER BY created_at DESC"
+        
+        proc_df, error = execute_query(query)
+        
+        if error:
+            st.error(f"Error loading requests: {error}")
+        elif proc_df is None or len(proc_df) == 0:
+            st.info("No procurement requests found")
+        else:
+            st.write(f"Found {len(proc_df)} requests")
+            
+            # Display requests
+            for _, proc in proc_df.iterrows():
+                with st.container():
+                    col1, col2, col3, col4 = st.columns([3, 2, 1, 1])
+                    with col1:
+                        st.write(f"**{proc['request_number']}**")
+                        st.caption(f"{proc['requester_name']} • {proc['location']}")
+                    with col2:
+                        st.write(f"Status: {proc['status']}")
+                        st.caption(f"Total: ${proc['total_amount']:.2f}")
+                    with col3:
+                        priority_colors = {'Normal': '🟢', 'High': '🟠', 'Urgent': '🔴'}
+                        st.write(f"{priority_colors.get(proc['priority'], '⚪')} {proc['priority']}")
+                    with col4:
+                        if st.button("View", key=f"view_proc_{proc['request_id']}"):
+                            st.session_state.view_procurement_id = proc['request_id']
+                            safe_rerun()
+                    st.markdown("---")
+
+# ============================================================================ 
+# FLEET MANAGEMENT PAGE
+# ============================================================================
+
+elif page == "🚗 Fleet Management":
+    st.header("🚗 Fleet Management")
+    
+    # Initialize session states
+    if 'show_request_vehicle' not in st.session_state:
+        st.session_state.show_request_vehicle = False
+    if 'view_trip_id' not in st.session_state:
+        st.session_state.view_trip_id = None
+    
+    # Action buttons
+    col1, col2 = st.columns([2, 1])
+    with col1:
+        if st.button("➕ Request a Vehicle"):
+            st.session_state.show_request_vehicle = True
+            st.session_state.view_trip_id = None
+            safe_rerun()
+    
+    # Request Vehicle Form
+    if st.session_state.show_request_vehicle:
+        st.markdown("---")
+        st.subheader("Request a Vehicle")
+        
+        # Get available vehicles
+        vehicles_query = """
+            SELECT id, make_model, license_plate, status
+            FROM dbo.vehicles
+            WHERE status = 'Available'
+            ORDER BY make_model
+        """
+        vehicles_df, _ = execute_query(vehicles_query)
+        
+        if vehicles_df is None or len(vehicles_df) == 0:
+            st.warning("No vehicles available at this time")
+            if st.button("← Back to Fleet"):
+                st.session_state.show_request_vehicle = False
+                safe_rerun()
+        else:
+            with st.form("request_vehicle_form"):
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    st.subheader("Trip Information")
+                    vehicle_options = {f"{row['make_model']} ({row['license_plate']})": row['id'] 
+                                     for _, row in vehicles_df.iterrows()}
+                    selected_vehicle = st.selectbox("Select Vehicle *", list(vehicle_options.keys()))
+                    
+                    departure_date = st.date_input("Departure Date *")
+                    departure_time = st.time_input("Departure Time *")
+                    
+                    return_date = st.date_input("Return Date *")
+                    return_time = st.time_input("Return Time *")
+                
+                with col2:
+                    st.subheader("Requester Information")
+                    requester_first = st.text_input("First Name *", placeholder="John")
+                    requester_last = st.text_input("Last Name *", placeholder="Doe")
+                    requester_email = st.text_input("Email *", placeholder="john.doe@vdh.virginia.gov")
+                    requester_phone = st.text_input("Phone", placeholder="(804) 555-1234")
+                
+                destination = st.text_input("Destination *", placeholder="Richmond, VA")
+                purpose = st.text_area("Purpose of Trip *", 
+                    placeholder="Describe the purpose of this trip...",
+                    height=100)
+                
+                starting_mileage = st.number_input("Starting Mileage *", min_value=0, value=0)
+                
+                col1, col2 = st.columns(2)
+                with col1:
+                    submit_button = st.form_submit_button("✅ Submit Request", )
+                with col2:
+                    cancel_button = st.form_submit_button("❌ Cancel", )
+                
+                if submit_button:
+                    if not all([selected_vehicle, departure_date, departure_time, return_date, 
+                               return_time, requester_first, requester_last, requester_email, 
+                               destination, purpose]):
+                        st.error("Please fill in all required fields (*)")
+                    else:
+                        vehicle_id = vehicle_options[selected_vehicle]
+                        
+                        # Combine date and time
+                        departure_datetime = datetime.combine(departure_date, departure_time)
+                        return_datetime = datetime.combine(return_date, return_time)
+                        
+                        # Insert trip request
+                        insert_query = """
+                            INSERT INTO dbo.Vehicle_Trips (
+                                vehicle_id, requester_first, requester_last, requester_email,
+                                requester_phone, destination, purpose, departure_time, return_time,
+                                starting_mileage, status, created_at
+                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Requested', GETDATE())
+                        """
+                        success, error = execute_non_query(insert_query, (
+                            vehicle_id, requester_first, requester_last, requester_email,
+                            requester_phone or None, destination, purpose,
+                            departure_datetime, return_datetime, starting_mileage
+                        ))
+                        
+                        if success:
+                            st.success("✅ Vehicle request submitted successfully!")
+                            st.session_state.show_request_vehicle = False
+                            safe_rerun()
+                        else:
+                            st.error(f"Error submitting request: {error}")
+                
+                if cancel_button:
+                    st.session_state.show_request_vehicle = False
+                    safe_rerun()
+    
+    # Fleet Status Display
+    if not st.session_state.show_request_vehicle and not st.session_state.view_trip_id:
+        st.markdown("---")
+        
+        # Quick Stats
+        col1, col2, col3 = st.columns(3)
+        
+        total_q, _ = execute_query("SELECT COUNT(1) as c FROM dbo.vehicles")
+        inuse_q, _ = execute_query("SELECT COUNT(1) as c FROM dbo.vehicles WHERE status = 'In Use'")
+        avail_q, _ = execute_query("SELECT COUNT(1) as c FROM dbo.vehicles WHERE status = 'Available'")
+        
+        with col1:
+            st.metric("Total Vehicles", int(total_q.iloc[0]['c']) if total_q is not None else 0)
+        with col2:
+            st.metric("In Use", int(inuse_q.iloc[0]['c']) if inuse_q is not None else 0)
+        with col3:
+            st.metric("Available", int(avail_q.iloc[0]['c']) if avail_q is not None else 0)
+        
+        st.markdown("---")
+        st.subheader("Vehicle Fleet")
+        
+        # Get all vehicles with current trip info
+        # Convert DATETIMEOFFSET columns to VARCHAR to avoid pyodbc type issues
+        vehicles_query = """
+            SELECT 
+                v.id,
+                v.make_model,
+                v.license_plate,
+                v.status,
+                v.current_mileage,
+                v.usage_count,
+                t.trip_id,
+                t.requester_first,
+                t.requester_last,
+                t.destination,
+                CONVERT(VARCHAR(50), t.departure_time, 127) as departure_time,
+                CONVERT(VARCHAR(50), t.return_time, 127) as return_time,
+                t.status as trip_status
+            FROM dbo.vehicles v
+            LEFT JOIN dbo.Vehicle_Trips t ON v.current_trip_id = t.trip_id
+            ORDER BY 
+                CASE WHEN v.status = 'Available' THEN 0
+                     WHEN v.status = 'In Use' THEN 1
+                     WHEN v.status = 'Maintenance' THEN 2
+                     ELSE 3 END,
+                v.id ASC
+        """
+        vehicles_df, error = execute_query(vehicles_query)
+        
+        if error:
+            st.error(f"Error loading vehicles: {error}")
+        elif vehicles_df is None or len(vehicles_df) == 0:
+            st.info("No vehicles found")
+        else:
+            for _, vehicle in vehicles_df.iterrows():
+                with st.container():
+                    col1, col2, col3 = st.columns([3, 2, 1])
+                    
+                    with col1:
+                        status_emoji = {'Available': '🟢', 'In Use': '🟡', 'Maintenance': '🔧', 'Out of Service': '🔴'}
+                        st.write(f"{status_emoji.get(vehicle['status'], '⚪')} **{vehicle['make_model']}** - {vehicle['license_plate']}")
+                        if vehicle['trip_id'] and vehicle['trip_status'] == 'In Use':
+                            st.caption(f"In use by: {vehicle['requester_first']} {vehicle['requester_last']}")
+                            st.caption(f"Destination: {vehicle['destination']}")
+                    
+                    with col2:
+                        st.write(f"Mileage: {vehicle['current_mileage'] if vehicle['current_mileage'] else '—'}")
+                        st.caption(f"Usage: {vehicle['usage_count'] if vehicle['usage_count'] else 0} trips")
+                    
+                    with col3:
+                        if vehicle['trip_id']:
+                            if st.button("View Trip", key=f"trip_{vehicle['trip_id']}"):
+                                st.session_state.view_trip_id = vehicle['trip_id']
+                                safe_rerun()
+                    
+                    st.markdown("---")
+
+# ============================================================================ 
+# REPORT BUILDER PAGE
+# ============================================================================
+
+elif page == "📈 Report Builder":
+    st.header("📈 Report Builder")
+    
+    st.subheader("Generate Custom Reports")
+    
+    # Report Type Selection
+    report_type = st.selectbox("Select Report Type", [
+        "Ticket Summary Report",
+        "Asset Inventory Report",
+        "Procurement Status Report",
+        "Fleet Usage Report"
+    ])
+    
+    # Date Range
+    col1, col2 = st.columns(2)
+    with col1:
+        start_date = st.date_input("Start Date", value=datetime.now() - timedelta(days=30))
+    with col2:
+        end_date = st.date_input("End Date", value=datetime.now())
+    
+    # Location Filter
+    locations = st.multiselect("Select Locations", [
+        "Petersburg", "Hopewell", "Dinwiddie", "Surry",
+        "Greensville/Emporia", "Prince George", "Sussex"
+    ], default=["Petersburg"])
+    
+    # Format Selection
+    report_format = st.selectbox("Report Format", ["Excel", "PDF", "CSV"])
+    
+    if st.button("🎯 Generate Report"):
+        with st.spinner("Generating report..."):
+            # Build query based on report type
+            if report_type == "Ticket Summary Report":
+                query = f"""
+                    SELECT 
+                        ticket_id,
+                        short_description AS ticket_subject,
+                        status AS ticket_status,
+                        priority AS ticket_priority,
+                        name AS customer_name,
+                        email AS customer_email,
+                        location AS vdh_location,
+                        phone_number,
+                        CONVERT(VARCHAR(50), created_at, 127) as created_date,
+                        CONVERT(VARCHAR(50), updated_at, 127) as updated_date
+                    FROM dbo.Tickets
+                    WHERE created_at BETWEEN '{start_date}' AND '{end_date}'
+                    AND location IN ('{"','".join(locations)}')
+                    ORDER BY created_at DESC
+                """
+            
+            elif report_type == "Asset Inventory Report":
+                query = f"""
+                    SELECT 
+                        asset_tag,
+                        type AS asset_type,
+                        model AS make_model,
+                        serial AS serial_number,
+                        status,
+                        location,
+                        assigned_user AS assigned_to,
+                        CONVERT(VARCHAR(50), purchase_date, 127) as purchase_date,
+                        CONVERT(VARCHAR(50), created_at, 127) as created_at
+                    FROM dbo.Assets
+                    WHERE location IN ('{"','".join(locations)}')
+                    ORDER BY asset_tag
+                """
+            
+            elif report_type == "Procurement Status Report":
+                query = f"""
+                    SELECT 
+                        request_number,
+                        requester_name,
+                        location,
+                        status,
+                        priority,
+                        total_amount,
+                        CONVERT(VARCHAR(50), created_at, 127) as created_at,
+                        CONVERT(VARCHAR(50), updated_at, 127) as updated_at
+                    FROM dbo.Procurement_Requests
+                    WHERE created_at BETWEEN '{start_date}' AND '{end_date}'
+                    AND location IN ('{"','".join(locations)}')
+                    ORDER BY created_at DESC
+                """
+            
+            else:  # Fleet Usage Report
+                query = f"""
+                    SELECT 
+                        v.make_model,
+                        v.license_plate,
+                        v.status,
+                        v.usage_count,
+                        v.current_mileage,
+                        COUNT(t.trip_id) as trips_in_period
+                    FROM dbo.vehicles v
+                    LEFT JOIN dbo.Vehicle_Trips t ON v.id = t.vehicle_id
+                        AND CONVERT(DATE, t.departure_time) BETWEEN '{start_date}' AND '{end_date}'
+                    GROUP BY v.make_model, v.license_plate, v.status, v.usage_count, v.current_mileage
+                    ORDER BY v.make_model
+                """
+            
+            # Execute query
+            df, error = execute_query(query)
+            
+            if error:
+                st.error(f"Error generating report: {error}")
+            elif df is None or len(df) == 0:
+                st.warning("No data found for the selected criteria")
+            else:
+                st.success(f"Report generated with {len(df)} records")
+                
+                # Preview
+                st.subheader("Report Preview")
+                st.dataframe(df, width="stretch", hide_index=True)
+                
+                # Generate download file
+                if report_format == "Excel" and HAS_EXCEL:
+                    output = generate_excel_report(df, report_type)
+                    if output:
+                        st.download_button(
+                            label="📥 Download Excel Report",
+                            data=output,
+                            file_name=f"{report_type.replace(' ', '_')}_{datetime.now().strftime('%Y%m%d')}.xlsx",
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                        )
+                
+                elif report_format == "PDF" and HAS_PDF:
+                    output = generate_pdf_report(df, report_type)
+                    if output:
+                        st.download_button(
+                            label="📥 Download PDF Report",
+                            data=output,
+                            file_name=f"{report_type.replace(' ', '_')}_{datetime.now().strftime('%Y%m%d')}.pdf",
+                            mime="application/pdf"
+                        )
+                
+                else:  # CSV
+                    csv = df.to_csv(index=False)
+                    st.download_button(
+                        label="📥 Download CSV Report",
+                        data=csv,
+                        file_name=f"{report_type.replace(' ', '_')}_{datetime.now().strftime('%Y%m%d')}.csv",
+                        mime="text/csv"
+                    )
+
+# ============================================================================ 
+# CONNECTION TEST PAGE
+# ============================================================================
+
+elif page == "🔌 Connection Test":
+    st.header("🔌 Database Connection Test")
+    
+    st.subheader("Connection Parameters")
+    server, database, username, _ = get_connection_string()
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        st.write(f"**Server:** {server}")
+        st.write(f"**Database:** {database}")
+    with col2:
+        st.write(f"**Username:** {username}")
+        st.write(f"**PyODBC Available:** {'✅ Yes' if HAS_PYODBC else '❌ No'}")
+    
+    st.markdown("---")
+    
+    # Quick Column Name Discovery
+    st.subheader("🔍 Discover Database Schema")
+    
+    if st.button("🔎 Show Table Columns", ):
+        with st.spinner("Discovering database schema..."):
+            # Get column names for each table
+            tables_to_check = ['Tickets', 'Assets', 'Procurement_Requests', 'vehicles', 'Vehicle_Trips']
+            
+            for table in tables_to_check:
+                st.write(f"**Table: dbo.{table}**")
+                
+                columns_query = f"""
+                    SELECT 
+                        COLUMN_NAME,
+                        DATA_TYPE,
+                        CHARACTER_MAXIMUM_LENGTH,
+                        IS_NULLABLE
+                    FROM INFORMATION_SCHEMA.COLUMNS
+                    WHERE TABLE_SCHEMA = 'dbo' 
+                    AND TABLE_NAME = '{table}'
+                    ORDER BY ORDINAL_POSITION
+                """
+                
+                cols_df, error = execute_query(columns_query)
+                
+                if error:
+                    st.error(f"Error: {error}")
+                elif cols_df is not None and len(cols_df) > 0:
+                    st.dataframe(cols_df, width="stretch", hide_index=True)
+                else:
+                    st.warning(f"Table {table} not found or has no columns")
+                
+                st.markdown("---")
+    
+    st.markdown("---")
+    
+    # Troubleshooting Guide
+    with st.expander("🔧 Connection Troubleshooting Guide", expanded=False):
+        st.markdown("""
+        ### Common Connection Issues:
+        
+        #### 1. **Timeout Errors (TCP Provider Timeout)**
+        - **Cause:** Azure SQL firewall blocking your IP address
+        - **Solution:** 
+          1. Go to Azure Portal → Your SQL Server → Networking/Firewall
+          2. Add your current IP address to the firewall rules
+          3. If using Azure App Service, add its outbound IPs
+          4. Or enable "Allow Azure services and resources to access this server"
+        
+        #### 2. **Login Timeout Expired**
+        - **Cause:** Connection taking too long (firewall, network issues)
+        - **Solution:**
+          1. Check firewall rules (see above)
+          2. Verify server name is correct: `yourserver.database.windows.net`
+          3. Ensure you're using port 1433 (TCP)
+          4. Check if server is in the same region for better latency
+        
+        #### 3. **Invalid Connection String Attribute**
+        - **Cause:** Wrong connection string format
+        - **Solution:**
+          1. Verify username format: `username@servername` for Azure SQL
+          2. Check for special characters in password (may need escaping)
+          3. Ensure using ODBC Driver 18 for SQL Server
+        
+        #### 4. **Login Failed for User**
+        - **Cause:** Wrong credentials or user doesn't exist
+        - **Solution:**
+          1. Verify username and password in Azure Portal
+          2. Check if user has access to the specific database
+          3. Try using Azure Active Directory authentication instead
+        
+        ### Current Configuration:
+        - **Connection Timeout:** 60 seconds
+        - **Login Timeout:** 60 seconds
+        - **Encryption:** Enabled
+        - **Port:** 1433 (TCP)
+        """)
+    
+    st.markdown("---")
+    
+    # Connection Test Buttons
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        if st.button("🔄 Test Connection (Basic)", ):
+            with st.spinner("Testing connection..."):
+                try:
+                    st.info("Attempting to connect to database...")
+                    conn = get_db_connection()
+                    st.success("✅ Connection successful!")
+                    
+                    # Test query
+                    test_query = "SELECT @@VERSION as version, GETDATE() as current_time"
+                    df, error = execute_query(test_query)
+                    
+                    if error:
+                        st.error(f"Query test failed: {error}")
+                    else:
+                        st.success("✅ Query execution successful!")
+                        if df is not None and len(df) > 0:
+                            st.write("**SQL Server Version:**")
+                            st.code(df.iloc[0]['version'][:200] + "...")  # Truncate for display
+                            st.write(f"**Server Time:** {df.iloc[0]['current_time']}")
+                    
+                    # Check tables
+                    st.subheader("Database Tables")
+                    tables_query = """
+                        SELECT TABLE_NAME, 
+                               (SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = t.TABLE_NAME) as column_count
+                        FROM INFORMATION_SCHEMA.TABLES t
+                        WHERE TABLE_SCHEMA = 'dbo' AND TABLE_TYPE = 'BASE TABLE'
+                        ORDER BY TABLE_NAME
+                    """
+                    tables_df, _ = execute_query(tables_query)
+                    
+                    if tables_df is not None and len(tables_df) > 0:
+                        st.write(f"Found {len(tables_df)} tables:")
+                        for _, row in tables_df.iterrows():
+                            st.write(f"- **{row['TABLE_NAME']}** ({row['column_count']} columns)")
+                    else:
+                        st.warning("No tables found in database")
+                    
+                    conn.close()
+                    
+                except ConnectionError as e:
+                    st.error(f"❌ Connection failed!")
+                    st.error(str(e))
+                    st.info("💡 Check the troubleshooting guide above for solutions")
+                except Exception as e:
+                    st.error(f"❌ Unexpected error: {str(e)}")
+                    st.code(traceback.format_exc())
+    
+    with col2:
+        if st.button("🔍 Test Connection (Detailed)", ):
+            with st.spinner("Running detailed diagnostics..."):
+                st.subheader("Detailed Diagnostics")
+                
+                # Step 1: Check parameters
+                st.write("**Step 1: Checking connection parameters...**")
+                if all([server, database, username]):
+                    st.success("✅ All parameters present")
+                    st.write(f"- Server: {server}")
+                    st.write(f"- Database: {database}")
+                    st.write(f"- Username: {username}")
+                else:
+                    st.error("❌ Missing connection parameters!")
+                    st.write(f"- Server: {'✅' if server else '❌'}")
+                    st.write(f"- Database: {'✅' if database else '❌'}")
+                    st.write(f"- Username: {'✅' if username else '❌'}")
+                    st.stop()
+                
+                # Step 2: Check pyodbc
+                st.write("**Step 2: Checking pyodbc driver...**")
+                if HAS_PYODBC:
+                    st.success("✅ pyodbc is available")
+                    try:
+                        drivers = pyodbc.drivers()
+                        st.write(f"Available drivers: {', '.join(drivers)}")
+                        if 'ODBC Driver 18 for SQL Server' in drivers:
+                            st.success("✅ ODBC Driver 18 for SQL Server found")
+                        else:
+                            st.warning("⚠️ ODBC Driver 18 not found. May cause issues.")
+                    except:
+                        st.warning("Could not list drivers")
+                else:
+                    st.error("❌ pyodbc not available!")
+                    st.stop()
+                
+                # Step 3: Attempt connection
+                st.write("**Step 3: Attempting database connection...**")
+                try:
+                    import time
+                    start_time = time.time()
+                    
+                    with st.spinner("Connecting (timeout: 60 seconds)..."):
+                        conn = get_db_connection()
+                        elapsed = time.time() - start_time
+                    
+                    st.success(f"✅ Connected successfully in {elapsed:.2f} seconds")
+                    
+                    # Step 4: Test query
+                    st.write("**Step 4: Testing query execution...**")
+                    test_query = "SELECT 1 as test"
+                    cursor = conn.cursor()
+                    cursor.execute(test_query)
+                    result = cursor.fetchone()
+                    cursor.close()
+                    
+                    if result and result[0] == 1:
+                        st.success("✅ Query execution successful")
+                    else:
+                        st.error("❌ Query returned unexpected result")
+                    
+                    # Step 5: Check permissions
+                    st.write("**Step 5: Checking database permissions...**")
+                    perm_query = """
+                        SELECT 
+                            USER_NAME() as current_user,
+                            HAS_PERMS_BY_NAME(DB_NAME(), 'DATABASE', 'SELECT') as can_select,
+                            HAS_PERMS_BY_NAME(DB_NAME(), 'DATABASE', 'INSERT') as can_insert,
+                            HAS_PERMS_BY_NAME(DB_NAME(), 'DATABASE', 'UPDATE') as can_update,
+                            HAS_PERMS_BY_NAME(DB_NAME(), 'DATABASE', 'DELETE') as can_delete
+                    """
+                    perm_df, _ = execute_query(perm_query)
+                    
+                    if perm_df is not None and len(perm_df) > 0:
+                        perm = perm_df.iloc[0]
+                        st.write(f"Current user: **{perm['current_user']}**")
+                        st.write(f"- SELECT: {'✅' if perm['can_select'] == 1 else '❌'}")
+                        st.write(f"- INSERT: {'✅' if perm['can_insert'] == 1 else '❌'}")
+                        st.write(f"- UPDATE: {'✅' if perm['can_update'] == 1 else '❌'}")
+                        st.write(f"- DELETE: {'✅' if perm['can_delete'] == 1 else '❌'}")
+                    
+                    conn.close()
+                    st.success("✅ All diagnostics passed!")
+                    
+                except ConnectionError as e:
+                    st.error("❌ Connection failed during detailed test")
+                    st.error(str(e))
+                    
+                    # Provide specific suggestions
+                    error_str = str(e).lower()
+                    if "timeout" in error_str or "tcp provider" in error_str:
+                        st.warning("**Suggested Actions:**")
+                        st.write("1. Check Azure SQL Server firewall rules")
+                        st.write("2. Add your IP address to allowed IPs")
+                        st.write("3. Verify server name is correct")
+                        st.write(f"4. Try: `az sql server firewall-rule create --resource-group <rg> --server {server.split('.')[0]} --name AllowMyIP --start-ip-address <your-ip> --end-ip-address <your-ip>`")
+                    elif "login" in error_str:
+                        st.warning("**Suggested Actions:**")
+                        st.write("1. Verify username and password")
+                        st.write(f"2. Ensure username format: {username.split('@')[0]}@{server.split('.')[0]}")
+                        st.write("3. Check if user exists in Azure Portal")
+                        st.write("4. Try resetting the password")
+                    
+                except Exception as e:
+                    st.error(f"❌ Unexpected error: {str(e)}")
+                    st.code(traceback.format_exc())
+
+# Footer
+st.markdown("---")
+st.markdown("*VDH Service Center - Comprehensive Management System | Virginia Department of Health © 2025*")

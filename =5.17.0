@@ -1,0 +1,11 @@
+Defaulting to user installation because normal site-packages is not writeable
+Collecting plotly
+  Using cached plotly-6.4.0-py3-none-any.whl.metadata (8.5 kB)
+Collecting narwhals>=1.15.1 (from plotly)
+  Downloading narwhals-2.11.0-py3-none-any.whl.metadata (11 kB)
+Collecting packaging (from plotly)
+  Using cached packaging-25.0-py3-none-any.whl.metadata (3.3 kB)
+Using cached plotly-6.4.0-py3-none-any.whl (9.9 MB)
+Downloading narwhals-2.11.0-py3-none-any.whl (423 kB)
+Using cached packaging-25.0-py3-none-any.whl (66 kB)
+Installing collected packages: packaging, narwhals, plotly
