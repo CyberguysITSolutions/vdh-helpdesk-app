@@ -33,3 +33,4 @@ def test_conn_and_tables():
 
 if __name__ == '__main__':
     test_conn_and_tables()
+    test_conn_and_tables()
