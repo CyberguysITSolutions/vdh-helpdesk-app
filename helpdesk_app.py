@@ -1109,18 +1109,29 @@ def main():
         st.markdown(html_links, unsafe_allow_html=True)
 
     try:
-        DB_AVAILABLE = True
-        try:
-            conn = get_db_connection()
-            try:
-                conn.close()
-            except Exception:
-                pass
-        except Exception as e:
+        # CRITICAL FIX: Check if DB credentials exist BEFORE attempting connection
+        server, database, username, password = get_connection_string()
+        
+        if not all([server, database, username, password]):
             DB_AVAILABLE = False
-            logger.warning("DB not available at startup: %s", e)
-    except Exception:
+            logger.warning("DB credentials not configured (missing env vars or secrets)")
+        else:
+            # Only try connection if we have credentials
+            try:
+                logger.info("Testing database connection...")
+                conn = get_db_connection()
+                logger.info("Database connection successful!")
+                DB_AVAILABLE = True
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+            except Exception as e:
+                DB_AVAILABLE = False
+                logger.warning("DB not available at startup: %s", e)
+    except Exception as e:
         DB_AVAILABLE = False
+        logger.error("Error checking DB: %s", e)
 
     # Get pending counts for navigation badges (pass DB_AVAILABLE)
     pending_counts = get_pending_counts(DB_AVAILABLE)
