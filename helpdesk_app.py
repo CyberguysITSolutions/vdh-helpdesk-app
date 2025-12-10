@@ -140,13 +140,28 @@ def get_db_connection():
     except Exception:
         pass
 
-    driver = "ODBC Driver 18 for SQL Server"
+    # Try different ODBC drivers
+    try:
+        import pyodbc
+        available_drivers = [x for x in pyodbc.drivers() if 'SQL Server' in x]
+        if available_drivers:
+            driver = available_drivers[0]  # Use first available
+            logger.info(f"Using ODBC driver: {driver}")
+        else:
+            driver = "ODBC Driver 18 for SQL Server"
+            logger.warning("No SQL Server drivers found, using default")
+    except:
+        driver = "ODBC Driver 18 for SQL Server"
+
     conn_str = (
         f"DRIVER={{{driver}}};"
         f"SERVER=tcp:{server},1433;"
         f"DATABASE={database};"
-        f"UID={username};PWD={password};"
-        "Encrypt=yes;TrustServerCertificate=no;Connection Timeout=60;Login Timeout=60;"
+        f"UID={username};"
+        f"PWD={password};"
+        "Encrypt=yes;"
+        "TrustServerCertificate=no;"
+        "Connection Timeout=30;"
     )
     try:
         conn = pyodbc.connect(conn_str, autocommit=False, timeout=60)
