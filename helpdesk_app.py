@@ -170,6 +170,7 @@ def get_db_connection():
         logger.exception("Database connection failed")
         raise ConnectionError(str(e))
 
+@st.cache_data(ttl=30)  # Cache for 30 seconds to improve performance
 def execute_query(query: str, params: Optional[tuple] = None) -> Tuple[Optional[pd.DataFrame], Optional[str]]:
     try:
         conn = get_db_connection()
@@ -1158,6 +1159,7 @@ def main():
         "💻 Asset Management",
         "🛒 Procurement Requests",
         "🚗 Fleet Management",
+        "🚙 Driver Trip Log",
         "📈 Report Builder",
         "🔌 Connection Test",
     ]
@@ -1197,6 +1199,13 @@ def main():
     # Update session state when page changes
     if page != st.session_state.current_page:
         st.session_state.current_page = page
+        # Force a fresh database check when page changes to ensure connection
+        if DB_AVAILABLE:
+            try:
+                test_conn = get_db_connection()
+                test_conn.close()
+            except Exception:
+                pass
     
     if not DB_AVAILABLE and page != "📊 Dashboard":
         st.header(page)
@@ -3338,6 +3347,260 @@ def main():
             st.success("Database appears to be reachable (connection established during startup check).")
         else:
             st.error("Database is not reachable. Check configuration and network.")
+
+    # DRIVER TRIP LOG - Mobile-optimized page for drivers to log vehicle trips
+    elif page == "🚙 Driver Trip Log":
+        st.header("🚙 Driver Trip Log")
+        
+        # Mobile-friendly styling
+        st.markdown("""
+            <style>
+            .stButton>button {
+                width: 100%;
+                height: 60px;
+                font-size: 20px;
+                margin: 10px 0;
+            }
+            .stTextInput>div>div>input, .stNumberInput>div>div>input {
+                font-size: 18px;
+                height: 50px;
+            }
+            .stSelectbox>div>div>select {
+                font-size: 18px;
+                height: 50px;
+            }
+            </style>
+        """, unsafe_allow_html=True)
+        
+        if not DB_AVAILABLE:
+            st.error("⚠️ Database connection required for trip logging")
+            st.stop()
+        
+        # Driver identification
+        st.subheader("👤 Driver Information")
+        driver_email = st.text_input("📧 Your Email Address", placeholder="driver@vdh.virginia.gov")
+        
+        if not driver_email:
+            st.info("👆 Please enter your email to continue")
+            st.stop()
+        
+        # Get approved vehicles for this driver
+        vehicles_query = """
+            SELECT v.id, v.vehicle_name, v.vehicle_type, v.license_plate, v.vin
+            FROM dbo.dispatched_vehicles dv
+            JOIN dbo.vehicles v ON dv.vehicle_id = v.id
+            WHERE dv.approved_email = ? AND dv.approval_status = 'Approved'
+        """
+        vehicles_df, vehicles_err = execute_query(vehicles_query, (driver_email,))
+        
+        if vehicles_err or vehicles_df is None or vehicles_df.empty:
+            st.warning(f"⚠️ No approved vehicles found for {driver_email}")
+            st.info("Contact your fleet manager to get vehicle approval.")
+            st.stop()
+        
+        # Vehicle selection
+        st.markdown("---")
+        st.subheader("🚙 Select Your Vehicle")
+        
+        vehicle_options = [
+            f"{row['vehicle_name']} - {row['license_plate']}" 
+            for _, row in vehicles_df.iterrows()
+        ]
+        selected_vehicle = st.selectbox("Vehicle", vehicle_options, label_visibility="collapsed")
+        vehicle_id = vehicles_df.iloc[vehicle_options.index(selected_vehicle)]['id']
+        
+        # Check for active trip
+        active_trip_query = """
+            SELECT trip_id, start_location, start_mileage, start_datetime, department
+            FROM dbo.vehicle_trips
+            WHERE vehicle_id = ? AND driver_email = ? AND trip_status = 'In Progress'
+            ORDER BY start_datetime DESC
+        """
+        active_trip_df, _ = execute_query(active_trip_query, (int(vehicle_id), driver_email))
+        
+        has_active_trip = active_trip_df is not None and not active_trip_df.empty
+        
+        # Tabs for Start Trip / End Trip
+        tab1, tab2, tab3 = st.tabs(["🟢 Start Trip", "🔴 End Trip", "📊 My Trips"])
+        
+        with tab1:
+            st.subheader("🟢 Start a New Trip")
+            
+            if has_active_trip:
+                st.warning("⚠️ You have an active trip! Please end it before starting a new one.")
+                st.info(f"Active trip started at: {active_trip_df.iloc[0]['start_location']}")
+            else:
+                with st.form("start_trip_form"):
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        start_location = st.text_input("📍 Starting Location*", 
+                                                      placeholder="e.g., VDH Petersburg Office")
+                        start_mileage = st.number_input("🛣️ Starting Mileage*", 
+                                                       min_value=0, step=1)
+                    with col2:
+                        departments = ["IT", "Administration", "Nursing", "Environmental Health", 
+                                     "Vital Records", "Clinical Services", "Maintenance", "Other"]
+                        department = st.selectbox("🏢 Department*", departments)
+                        trip_notes = st.text_area("📝 Trip Purpose (Optional)", 
+                                                  placeholder="Brief description of trip purpose")
+                    
+                    submit_start = st.form_submit_button("🚗 START TRIP", use_container_width=True)
+                    
+                    if submit_start:
+                        if not start_location or start_mileage == 0:
+                            st.error("Please fill in all required fields!")
+                        else:
+                            insert_query = """
+                                INSERT INTO dbo.vehicle_trips 
+                                (vehicle_id, driver_email, driver_name, department, 
+                                 start_location, start_mileage, start_datetime, trip_status, notes)
+                                VALUES (?, ?, ?, ?, ?, ?, GETDATE(), 'In Progress', ?)
+                            """
+                            driver_name = driver_email.split('@')[0]  # Extract name from email
+                            
+                            result, insert_err = execute_non_query(
+                                insert_query, 
+                                (int(vehicle_id), driver_email, driver_name, department,
+                                 start_location, int(start_mileage), trip_notes)
+                            )
+                            
+                            if insert_err or not result:
+                                st.error(f"❌ Error starting trip: {insert_err}")
+                            else:
+                                st.success("✅ Trip started successfully!")
+                                st.balloons()
+                                time.sleep(1)
+                                st.rerun()
+        
+        with tab2:
+            st.subheader("🔴 End Current Trip")
+            
+            if not has_active_trip:
+                st.info("ℹ️ No active trip to end. Start a new trip first!")
+            else:
+                trip_id = active_trip_df.iloc[0]['trip_id']
+                start_info = active_trip_df.iloc[0]
+                
+                st.success(f"**Active Trip:**")
+                st.write(f"🏁 Started from: {start_info['start_location']}")
+                st.write(f"📏 Starting mileage: {start_info['start_mileage']:,} miles")
+                st.write(f"🕐 Started at: {start_info['start_datetime']}")
+                
+                with st.form("end_trip_form"):
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        end_location = st.text_input("📍 Ending Location*", 
+                                                    placeholder="e.g., VDH Hopewell Office")
+                        end_mileage = st.number_input("🛣️ Ending Mileage*", 
+                                                     min_value=int(start_info['start_mileage']), 
+                                                     step=1)
+                    with col2:
+                        end_notes = st.text_area("📝 Trip Notes (Optional)", 
+                                                placeholder="Any issues or observations")
+                        
+                        # Photo upload
+                        uploaded_photos = st.file_uploader(
+                            "📸 Upload Trip Photos (Optional)",
+                            type=['jpg', 'jpeg', 'png'],
+                            accept_multiple_files=True
+                        )
+                    
+                    miles_driven = end_mileage - int(start_info['start_mileage']) if end_mileage > 0 else 0
+                    if miles_driven > 0:
+                        st.info(f"🛣️ Miles driven: **{miles_driven}** miles")
+                    
+                    submit_end = st.form_submit_button("🏁 END TRIP", use_container_width=True)
+                    
+                    if submit_end:
+                        if not end_location or end_mileage == 0:
+                            st.error("Please fill in all required fields!")
+                        elif end_mileage < int(start_info['start_mileage']):
+                            st.error("Ending mileage cannot be less than starting mileage!")
+                        else:
+                            # Update trip
+                            update_query = """
+                                UPDATE dbo.vehicle_trips
+                                SET end_location = ?, end_mileage = ?, end_datetime = GETDATE(),
+                                    trip_status = 'Completed', 
+                                    notes = ISNULL(notes, '') + CHAR(13) + CHAR(10) + ?
+                                WHERE trip_id = ?
+                            """
+                            
+                            result, update_err = execute_non_query(
+                                update_query,
+                                (end_location, int(end_mileage), end_notes or '', int(trip_id))
+                            )
+                            
+                            if update_err or not result:
+                                st.error(f"❌ Error ending trip: {update_err}")
+                            else:
+                                # Upload photos if any
+                                if uploaded_photos:
+                                    for photo in uploaded_photos:
+                                        photo_bytes = photo.read()
+                                        photo_query = """
+                                            INSERT INTO dbo.trip_photos 
+                                            (trip_id, photo_data, photo_filename, photo_size)
+                                            VALUES (?, ?, ?, ?)
+                                        """
+                                        execute_non_query(
+                                            photo_query,
+                                            (int(trip_id), photo_bytes, photo.name, len(photo_bytes))
+                                        )
+                                
+                                st.success(f"✅ Trip completed! You drove {miles_driven} miles.")
+                                st.balloons()
+                                time.sleep(1)
+                                st.rerun()
+        
+        with tab3:
+            st.subheader("📊 My Trip History")
+            
+            # Get all trips for this driver
+            trips_query = """
+                SELECT 
+                    t.trip_id,
+                    v.vehicle_name,
+                    t.start_location,
+                    t.end_location,
+                    t.start_mileage,
+                    t.end_mileage,
+                    t.miles_driven,
+                    t.department,
+                    t.start_datetime,
+                    t.end_datetime,
+                    t.trip_status,
+                    (SELECT COUNT(*) FROM dbo.trip_photos WHERE trip_id = t.trip_id) as photo_count
+                FROM dbo.vehicle_trips t
+                JOIN dbo.vehicles v ON t.vehicle_id = v.id
+                WHERE t.driver_email = ?
+                ORDER BY t.start_datetime DESC
+            """
+            trips_df, trips_err = execute_query(trips_query, (driver_email,))
+            
+            if trips_err or trips_df is None or trips_df.empty:
+                st.info("📭 No trips found")
+            else:
+                st.write(f"**Total trips: {len(trips_df)}**")
+                
+                for _, trip in trips_df.iterrows():
+                    status_emoji = "🟢" if trip['trip_status'] == 'In Progress' else "✅"
+                    
+                    with st.expander(f"{status_emoji} {trip['vehicle_name']} - {trip['start_datetime'].strftime('%m/%d/%Y %I:%M %p')}"):
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            st.write(f"**From:** {trip['start_location']}")
+                            st.write(f"**To:** {trip['end_location'] or 'In progress...'}")
+                            st.write(f"**Department:** {trip['department']}")
+                        with col2:
+                            st.write(f"**Start Mileage:** {trip['start_mileage']:,}")
+                            st.write(f"**End Mileage:** {trip['end_mileage'] or 'N/A'}")
+                            if trip['miles_driven']:
+                                st.write(f"**Miles Driven:** {trip['miles_driven']} miles")
+                        
+                        st.write(f"**Status:** {trip['trip_status']}")
+                        if trip['photo_count'] > 0:
+                            st.write(f"📸 {trip['photo_count']} photo(s) attached")
 
     st.markdown("---")
     st.markdown("*VDH Service Center - Comprehensive Management System | Virginia Department of Health © 2025*")
