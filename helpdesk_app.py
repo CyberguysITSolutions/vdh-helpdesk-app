@@ -1291,6 +1291,7 @@ def main():
         st.caption("UI tweak script not applied.")
 
     # VDH Logo - Direct SVG (fixed: removed via.placeholder.com which was causing blank screens)
+    import base64  # Import here to avoid scoping issues
     svg = """
     <svg width="200" height="80" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="VDH">
       <rect width="200" height="80" fill="#002855" rx="6" ry="6"/>
