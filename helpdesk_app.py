@@ -1587,12 +1587,11 @@ def render_adjust_stock_form(selected_location_id):
                     update_query = """
                         UPDATE dbo.resource_inventory 
                         SET quantity_on_hand = ?, 
-                            quantity_available = ?,
                             updated_by = ?, 
                             updated_at = GETDATE()
                         WHERE resource_id = ? AND location_id = ?
                     """
-                    result, err = execute_non_query(update_query, (final_qty, final_qty, username, resource_id, selected_location_id))
+                    result, err = execute_non_query(update_query, (final_qty, username, resource_id, selected_location_id))
                     
                     if err:
                         st.error(f"❌ Error updating inventory: {err}")
@@ -1679,143 +1678,164 @@ def render_manifest_creation():
         st.error("No locations available. Please add locations first.")
         return
     
-    # Initialize session state for manifest items
+    # Initialize session state for manifest
     if 'manifest_items' not in st.session_state:
         st.session_state.manifest_items = []
+    if 'manifest_from' not in st.session_state:
+        st.session_state.manifest_from = None
+    if 'manifest_to' not in st.session_state:
+        st.session_state.manifest_to = None
+    if 'manifest_notes' not in st.session_state:
+        st.session_state.manifest_notes = ""
+    if 'manifest_date' not in st.session_state:
+        import datetime
+        st.session_state.manifest_date = datetime.date.today()
     
-    with st.form("manifest_header_form"):
-        st.markdown("### Shipment Details")
-        
-        col1, col2 = st.columns(2)
+    # Step 1: Shipment Header (not in a form initially)
+    st.markdown("### Shipment Details")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        from_location = st.selectbox(
+            "From Location *",
+            options=locations_df['location_id'].tolist(),
+            format_func=lambda x: locations_df[locations_df['location_id']==x]['location_name'].values[0],
+            key="manifest_from_selector"
+        )
+        st.session_state.manifest_from = from_location
+    
+    with col2:
+        to_location = st.selectbox(
+            "To Location *",
+            options=locations_df['location_id'].tolist(),
+            format_func=lambda x: locations_df[locations_df['location_id']==x]['location_name'].values[0],
+            key="manifest_to_selector"
+        )
+        st.session_state.manifest_to = to_location
+    
+    shipment_date = st.date_input("Shipment Date *", value=st.session_state.manifest_date, key="manifest_date_input")
+    st.session_state.manifest_date = shipment_date
+    
+    notes = st.text_area("Notes", value=st.session_state.manifest_notes, placeholder="Optional shipment notes", key="manifest_notes_input")
+    st.session_state.manifest_notes = notes
+    
+    if from_location == to_location:
+        st.error("⚠️ Source and destination locations must be different")
+        return
+    
+    st.markdown("---")
+    
+    # Step 2: Add Items
+    st.markdown("### Add Items to Manifest")
+    
+    inventory_df = get_inventory_by_location(from_location)
+    
+    if inventory_df.empty:
+        st.warning("No inventory available at source location")
+    else:
+        col1, col2, col3 = st.columns([3, 2, 2])
         
         with col1:
-            from_location = st.selectbox(
-                "From Location *",
-                options=locations_df['location_id'].tolist(),
-                format_func=lambda x: locations_df[locations_df['location_id']==x]['location_name'].values[0],
-                key="from_loc"
+            resource_name = st.selectbox(
+                "Select Resource",
+                options=inventory_df['resource_name'].tolist(),
+                key="manifest_resource_selector"
             )
+        
+        selected_row = inventory_df[inventory_df['resource_name'] == resource_name].iloc[0]
+        available_qty = int(selected_row['quantity_available'])
         
         with col2:
-            to_location = st.selectbox(
-                "To Location *",
-                options=locations_df['location_id'].tolist(),
-                format_func=lambda x: locations_df[locations_df['location_id']==x]['location_name'].values[0],
-                key="to_loc"
-            )
+            st.metric("Available", f"{available_qty} {selected_row['unit_of_measure']}")
         
-        shipment_date = st.date_input("Shipment Date *")
-        notes = st.text_area("Notes", placeholder="Optional shipment notes")
+        with col3:
+            quantity = st.number_input("Quantity", min_value=1, max_value=max(1, available_qty), value=min(1, available_qty), key="manifest_qty")
         
-        col1, col2 = st.columns(2)
+        if st.button("➕ Add to Manifest", type="primary", use_container_width=True):
+            st.session_state.manifest_items.append({
+                'resource_id': int(selected_row['resource_id']),
+                'resource_name': resource_name,
+                'quantity': quantity,
+                'unit': selected_row['unit_of_measure']
+            })
+            st.success(f"Added {quantity} {selected_row['unit_of_measure']} of {resource_name}")
+            st.rerun()
+    
+    # Step 3: Display current items and finalize
+    if st.session_state.manifest_items:
+        st.markdown("---")
+        st.markdown("### Current Manifest Items")
+        import pandas as pd
+        items_df = pd.DataFrame(st.session_state.manifest_items)
+        st.dataframe(items_df[['resource_name', 'quantity', 'unit']], use_container_width=True, hide_index=True)
+        
+        col1, col2, col3 = st.columns([2, 2, 1])
+        
         with col1:
-            if st.form_submit_button("➕ Add Items to Manifest", type="primary", use_container_width=True):
-                if from_location == to_location:
-                    st.error("⚠️ Source and destination locations must be different")
+            if st.button("✅ Create Manifest", type="primary", use_container_width=True):
+                # Create the manifest
+                username = st.session_state.get('username', 'Unknown')
+                
+                # Insert shipment header
+                shipment_query = """
+                    INSERT INTO dbo.resource_shipments 
+                    (from_location_id, to_location_id, shipment_date, status, notes, created_by, created_at)
+                    OUTPUT INSERTED.shipment_id
+                    VALUES (?, ?, ?, 'Pending', ?, ?, GETDATE())
+                """
+                
+                result_df, err = execute_query(shipment_query, (
+                    st.session_state.manifest_from,
+                    st.session_state.manifest_to,
+                    st.session_state.manifest_date,
+                    st.session_state.manifest_notes,
+                    username
+                ))
+                
+                if err:
+                    st.error(f"❌ Error creating manifest: {err}")
                 else:
-                    st.session_state.manifest_from = from_location
-                    st.session_state.manifest_to = to_location
-                    st.session_state.manifest_date = shipment_date
-                    st.session_state.manifest_notes = notes
-                    st.session_state.show_add_items = True
+                    shipment_id = result_df.iloc[0]['shipment_id']
+                    
+                    # Insert shipment items
+                    for item in st.session_state.manifest_items:
+                        item_query = """
+                            INSERT INTO dbo.resource_shipment_items 
+                            (shipment_id, resource_id, quantity_shipped)
+                            VALUES (?, ?, ?)
+                        """
+                        execute_non_query(item_query, (shipment_id, item['resource_id'], item['quantity']))
+                    
+                    st.success(f"✅ Manifest created successfully! Shipment ID: {shipment_id}")
+                    
+                    # Clear session state
+                    st.session_state.manifest_items = []
+                    st.session_state.manifest_notes = ""
+                    import time
+                    time.sleep(2)
+                    st.session_state.resource_view = 'manifests'
                     st.rerun()
         
         with col2:
-            if st.form_submit_button("❌ Cancel", use_container_width=True):
+            if st.button("🗑️ Clear All Items", use_container_width=True):
                 st.session_state.manifest_items = []
+                st.rerun()
+        
+        with col3:
+            if st.button("❌ Cancel", use_container_width=True):
+                st.session_state.manifest_items = []
+                st.session_state.manifest_notes = ""
                 st.session_state.resource_view = 'dashboard'
                 st.rerun()
-    
-    # Show item addition form if flag is set
-    if st.session_state.get('show_add_items', False):
-        st.markdown("---")
-        st.markdown("### Add Items to Manifest")
-        
-        from_loc_id = st.session_state.get('manifest_from')
-        inventory_df = get_inventory_by_location(from_loc_id)
-        
-        if inventory_df.empty:
-            st.warning("No inventory available at source location")
-        else:
-            with st.form("add_manifest_item"):
-                resource_name = st.selectbox(
-                    "Select Resource",
-                    options=inventory_df['resource_name'].tolist()
-                )
-                
-                selected_row = inventory_df[inventory_df['resource_name'] == resource_name].iloc[0]
-                available_qty = int(selected_row['quantity_available'])
-                
-                st.info(f"Available: **{available_qty}** {selected_row['unit_of_measure']}")
-                
-                quantity = st.number_input("Quantity to Ship", min_value=1, max_value=available_qty, value=min(1, available_qty))
-                
-                col1, col2 = st.columns(2)
-                with col1:
-                    if st.form_submit_button("➕ Add to Manifest", type="primary", use_container_width=True):
-                        st.session_state.manifest_items.append({
-                            'resource_id': int(selected_row['resource_id']),
-                            'resource_name': resource_name,
-                            'quantity': quantity,
-                            'unit': selected_row['unit_of_measure']
-                        })
-                        st.success(f"Added {quantity} {selected_row['unit_of_measure']} of {resource_name}")
-                        st.rerun()
-                
-                with col2:
-                    if st.form_submit_button("✅ Finalize Manifest", use_container_width=True):
-                        if not st.session_state.manifest_items:
-                            st.error("⚠️ Please add at least one item to the manifest")
-                        else:
-                            # Create the manifest
-                            username = st.session_state.get('username', 'Unknown')
-                            
-                            # Insert shipment header
-                            shipment_query = """
-                                INSERT INTO dbo.resource_shipments 
-                                (from_location_id, to_location_id, shipment_date, status, notes, created_by, created_at)
-                                OUTPUT INSERTED.shipment_id
-                                VALUES (?, ?, ?, 'Pending', ?, ?, GETDATE())
-                            """
-                            
-                            result_df, err = execute_query(shipment_query, (
-                                st.session_state.manifest_from,
-                                st.session_state.manifest_to,
-                                st.session_state.manifest_date,
-                                st.session_state.manifest_notes,
-                                username
-                            ))
-                            
-                            if err:
-                                st.error(f"❌ Error creating manifest: {err}")
-                            else:
-                                shipment_id = result_df.iloc[0]['shipment_id']
-                                
-                                # Insert shipment items
-                                for item in st.session_state.manifest_items:
-                                    item_query = """
-                                        INSERT INTO dbo.resource_shipment_items 
-                                        (shipment_id, resource_id, quantity_shipped)
-                                        VALUES (?, ?, ?)
-                                    """
-                                    execute_non_query(item_query, (shipment_id, item['resource_id'], item['quantity']))
-                                
-                                st.success(f"✅ Manifest created successfully! Shipment ID: {shipment_id}")
-                                
-                                # Clear session state
-                                st.session_state.manifest_items = []
-                                st.session_state.show_add_items = False
-                                import time
-                                time.sleep(2)
-                                st.session_state.resource_view = 'manifests'
-                                st.rerun()
-        
-        # Display current manifest items
-        if st.session_state.manifest_items:
-            st.markdown("### Current Manifest Items")
-            import pandas as pd
-            items_df = pd.DataFrame(st.session_state.manifest_items)
-            st.dataframe(items_df[['resource_name', 'quantity', 'unit']], use_container_width=True, hide_index=True)
+    else:
+        col1, col2 = st.columns(2)
+        with col2:
+            if st.button("❌ Cancel", use_container_width=True):
+                st.session_state.manifest_items = []
+                st.session_state.manifest_notes = ""
+                st.session_state.resource_view = 'dashboard'
+                st.rerun()
 
 def render_manifest_list():
     """View all manifests/shipments"""
