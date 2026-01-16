@@ -827,8 +827,6 @@ def render_request_vehicle_public_form():
                         else:
                             st.error(f"❌ Error submitting request: {error}")
 
-
-
 def render_procurement_request_public_form():
     # Hide default Streamlit navigation
     st.markdown("""
@@ -1227,7 +1225,6 @@ def get_pending_counts(db_available=False):
     
     return counts
 
-
 # =====================================================
 # RESOURCE MANAGEMENT HELPER FUNCTIONS
 # =====================================================
@@ -1420,7 +1417,6 @@ def render_add_resource_form():
 # SECTION 2: INVENTORY MANAGEMENT
 # =====================================================
 
-
 def render_inventory_management():
     """View and manage inventory levels"""
     st.subheader("📦 Inventory Management")
@@ -1443,6 +1439,11 @@ def render_inventory_management():
     with col3:
         if st.button("➕ Adjust Stock"):
             st.session_state.show_adjust_form = True
+    
+    # Show adjustment form if requested
+    if st.session_state.get('show_adjust_form', False):
+        render_adjust_stock_form(selected_location_id)
+        return
     
     inventory_df = get_inventory_by_location(selected_location_id)
     
@@ -1483,7 +1484,6 @@ def render_inventory_management():
 # SECTION 3: RESOURCE DASHBOARD
 # =====================================================
 
-
 def render_resource_dashboard():
     """Dashboard with key metrics"""
     st.subheader("📊 Resource Management Dashboard")
@@ -1523,6 +1523,323 @@ def render_resource_dashboard():
 # SECTION 4: MAIN RESOURCE MANAGEMENT PAGE
 # =====================================================
 
+def render_adjust_stock_form(selected_location_id):
+    """Form to adjust inventory quantities"""
+    st.subheader("📊 Adjust Stock Levels")
+    
+    inventory_df = get_inventory_by_location(selected_location_id)
+    
+    if inventory_df.empty:
+        st.warning("No inventory items available for adjustment")
+        return
+    
+    with st.form("adjust_stock_form"):
+        # Select resource
+        resource_options = inventory_df['resource_name'].tolist()
+        selected_resource = st.selectbox("Select Resource", resource_options)
+        
+        # Get current quantity
+        current_row = inventory_df[inventory_df['resource_name'] == selected_resource].iloc[0]
+        current_qty = int(current_row['quantity_on_hand'])
+        
+        st.info(f"Current Stock: **{current_qty}** {current_row['unit_of_measure']}")
+        
+        # Adjustment type
+        adjustment_type = st.radio("Adjustment Type", ['Add Stock', 'Remove Stock', 'Set Exact Quantity'])
+        
+        if adjustment_type == 'Set Exact Quantity':
+            new_quantity = st.number_input("New Quantity", min_value=0, value=current_qty)
+            adjustment = new_quantity - current_qty
+        else:
+            adjustment = st.number_input("Quantity to Adjust", min_value=0, value=0)
+            if adjustment_type == 'Remove Stock':
+                adjustment = -adjustment
+        
+        reason = st.text_area("Reason for Adjustment *", placeholder="e.g., Received shipment, Damaged items, Inventory count correction")
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            submit = st.form_submit_button("💾 Apply Adjustment", type="primary", use_container_width=True)
+        with col2:
+            cancel = st.form_submit_button("❌ Cancel", use_container_width=True)
+        
+        if cancel:
+            st.session_state.show_adjust_form = False
+            st.rerun()
+        
+        if submit:
+            if not reason:
+                st.error("⚠️ Please provide a reason for the adjustment")
+            else:
+                username = st.session_state.get('username', 'Unknown')
+                resource_id = int(current_row['resource_id'])
+                
+                # Calculate new quantity
+                if adjustment_type == 'Set Exact Quantity':
+                    final_qty = new_quantity
+                else:
+                    final_qty = current_qty + adjustment
+                
+                if final_qty < 0:
+                    st.error("❌ Cannot reduce stock below zero")
+                else:
+                    # Update inventory
+                    update_query = """
+                        UPDATE dbo.resource_inventory 
+                        SET quantity_on_hand = ?, 
+                            quantity_available = ?,
+                            updated_by = ?, 
+                            updated_at = GETDATE()
+                        WHERE resource_id = ? AND location_id = ?
+                    """
+                    result, err = execute_non_query(update_query, (final_qty, final_qty, username, resource_id, selected_location_id))
+                    
+                    if err:
+                        st.error(f"❌ Error updating inventory: {err}")
+                    else:
+                        # Log the adjustment
+                        log_query = """
+                            INSERT INTO dbo.resource_inventory_log (resource_id, location_id, adjustment_qty, 
+                                                                     reason, adjusted_by, adjusted_at)
+                            VALUES (?, ?, ?, ?, ?, GETDATE())
+                        """
+                        execute_non_query(log_query, (resource_id, selected_location_id, adjustment, reason, username))
+                        
+                        st.success(f"✅ Stock adjusted successfully! New quantity: {final_qty}")
+                        import time
+                        time.sleep(1)
+                        st.session_state.show_adjust_form = False
+                        st.rerun()
+
+def render_location_management():
+    """View and manage resource locations"""
+    st.subheader("📍 Location Management")
+    
+    locations_df = get_resource_locations()
+    
+    if locations_df.empty:
+        st.warning("No locations configured")
+    else:
+        st.markdown("### Active Locations")
+        st.dataframe(
+            locations_df[['location_name', 'location_type']],
+            use_container_width=True,
+            hide_index=True
+        )
+    
+    st.markdown("---")
+    st.markdown("### Add New Location")
+    
+    with st.form("add_location_form"):
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            location_name = st.text_input("Location Name *", placeholder="e.g., Crater Health District")
+        
+        with col2:
+            location_type = st.selectbox("Location Type *", ['Health District', 'Warehouse', 'Satellite Office', 'Other'])
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            submit = st.form_submit_button("💾 Add Location", type="primary", use_container_width=True)
+        with col2:
+            cancel = st.form_submit_button("❌ Cancel", use_container_width=True)
+        
+        if cancel:
+            st.session_state.resource_view = 'dashboard'
+            st.rerun()
+        
+        if submit:
+            if not location_name:
+                st.error("⚠️ Please enter a location name")
+            else:
+                username = st.session_state.get('username', 'Unknown')
+                
+                insert_query = """
+                    INSERT INTO dbo.resource_locations (location_name, location_type, is_active, created_by, created_at)
+                    VALUES (?, ?, 1, ?, GETDATE())
+                """
+                
+                result, err = execute_non_query(insert_query, (location_name, location_type, username))
+                
+                if err:
+                    st.error(f"❌ Error adding location: {err}")
+                else:
+                    st.success(f"✅ Location '{location_name}' added successfully!")
+                    import time
+                    time.sleep(1)
+                    st.rerun()
+
+def render_manifest_creation():
+    """Create a new resource manifest/shipment"""
+    st.subheader("📦 Create New Manifest")
+    
+    locations_df = get_resource_locations()
+    if locations_df.empty:
+        st.error("No locations available. Please add locations first.")
+        return
+    
+    # Initialize session state for manifest items
+    if 'manifest_items' not in st.session_state:
+        st.session_state.manifest_items = []
+    
+    with st.form("manifest_header_form"):
+        st.markdown("### Shipment Details")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            from_location = st.selectbox(
+                "From Location *",
+                options=locations_df['location_id'].tolist(),
+                format_func=lambda x: locations_df[locations_df['location_id']==x]['location_name'].values[0],
+                key="from_loc"
+            )
+        
+        with col2:
+            to_location = st.selectbox(
+                "To Location *",
+                options=locations_df['location_id'].tolist(),
+                format_func=lambda x: locations_df[locations_df['location_id']==x]['location_name'].values[0],
+                key="to_loc"
+            )
+        
+        shipment_date = st.date_input("Shipment Date *")
+        notes = st.text_area("Notes", placeholder="Optional shipment notes")
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.form_submit_button("➕ Add Items to Manifest", type="primary", use_container_width=True):
+                if from_location == to_location:
+                    st.error("⚠️ Source and destination locations must be different")
+                else:
+                    st.session_state.manifest_from = from_location
+                    st.session_state.manifest_to = to_location
+                    st.session_state.manifest_date = shipment_date
+                    st.session_state.manifest_notes = notes
+                    st.session_state.show_add_items = True
+                    st.rerun()
+        
+        with col2:
+            if st.form_submit_button("❌ Cancel", use_container_width=True):
+                st.session_state.manifest_items = []
+                st.session_state.resource_view = 'dashboard'
+                st.rerun()
+    
+    # Show item addition form if flag is set
+    if st.session_state.get('show_add_items', False):
+        st.markdown("---")
+        st.markdown("### Add Items to Manifest")
+        
+        from_loc_id = st.session_state.get('manifest_from')
+        inventory_df = get_inventory_by_location(from_loc_id)
+        
+        if inventory_df.empty:
+            st.warning("No inventory available at source location")
+        else:
+            with st.form("add_manifest_item"):
+                resource_name = st.selectbox(
+                    "Select Resource",
+                    options=inventory_df['resource_name'].tolist()
+                )
+                
+                selected_row = inventory_df[inventory_df['resource_name'] == resource_name].iloc[0]
+                available_qty = int(selected_row['quantity_available'])
+                
+                st.info(f"Available: **{available_qty}** {selected_row['unit_of_measure']}")
+                
+                quantity = st.number_input("Quantity to Ship", min_value=1, max_value=available_qty, value=min(1, available_qty))
+                
+                col1, col2 = st.columns(2)
+                with col1:
+                    if st.form_submit_button("➕ Add to Manifest", type="primary", use_container_width=True):
+                        st.session_state.manifest_items.append({
+                            'resource_id': int(selected_row['resource_id']),
+                            'resource_name': resource_name,
+                            'quantity': quantity,
+                            'unit': selected_row['unit_of_measure']
+                        })
+                        st.success(f"Added {quantity} {selected_row['unit_of_measure']} of {resource_name}")
+                        st.rerun()
+                
+                with col2:
+                    if st.form_submit_button("✅ Finalize Manifest", use_container_width=True):
+                        if not st.session_state.manifest_items:
+                            st.error("⚠️ Please add at least one item to the manifest")
+                        else:
+                            # Create the manifest
+                            username = st.session_state.get('username', 'Unknown')
+                            
+                            # Insert shipment header
+                            shipment_query = """
+                                INSERT INTO dbo.resource_shipments 
+                                (from_location_id, to_location_id, shipment_date, status, notes, created_by, created_at)
+                                OUTPUT INSERTED.shipment_id
+                                VALUES (?, ?, ?, 'Pending', ?, ?, GETDATE())
+                            """
+                            
+                            result_df, err = execute_query(shipment_query, (
+                                st.session_state.manifest_from,
+                                st.session_state.manifest_to,
+                                st.session_state.manifest_date,
+                                st.session_state.manifest_notes,
+                                username
+                            ))
+                            
+                            if err:
+                                st.error(f"❌ Error creating manifest: {err}")
+                            else:
+                                shipment_id = result_df.iloc[0]['shipment_id']
+                                
+                                # Insert shipment items
+                                for item in st.session_state.manifest_items:
+                                    item_query = """
+                                        INSERT INTO dbo.resource_shipment_items 
+                                        (shipment_id, resource_id, quantity_shipped)
+                                        VALUES (?, ?, ?)
+                                    """
+                                    execute_non_query(item_query, (shipment_id, item['resource_id'], item['quantity']))
+                                
+                                st.success(f"✅ Manifest created successfully! Shipment ID: {shipment_id}")
+                                
+                                # Clear session state
+                                st.session_state.manifest_items = []
+                                st.session_state.show_add_items = False
+                                import time
+                                time.sleep(2)
+                                st.session_state.resource_view = 'manifests'
+                                st.rerun()
+        
+        # Display current manifest items
+        if st.session_state.manifest_items:
+            st.markdown("### Current Manifest Items")
+            import pandas as pd
+            items_df = pd.DataFrame(st.session_state.manifest_items)
+            st.dataframe(items_df[['resource_name', 'quantity', 'unit']], use_container_width=True, hide_index=True)
+
+def render_manifest_list():
+    """View all manifests/shipments"""
+    st.subheader("📋 Manifests")
+    
+    query = """
+        SELECT s.shipment_id, s.shipment_date, 
+               fl.location_name as from_location, 
+               tl.location_name as to_location,
+               s.status, s.created_by, s.created_at
+        FROM dbo.resource_shipments s
+        INNER JOIN dbo.resource_locations fl ON s.from_location_id = fl.location_id
+        INNER JOIN dbo.resource_locations tl ON s.to_location_id = tl.location_id
+        ORDER BY s.created_at DESC
+    """
+    
+    df, err = execute_query(query)
+    
+    if err:
+        st.error(f"Error loading manifests: {err}")
+    elif df.empty:
+        st.info("No manifests found. Create your first manifest to get started.")
+    else:
+        st.dataframe(df, use_container_width=True, hide_index=True)
 
 def render_resource_management():
     """Main Resource Management page"""
@@ -1581,16 +1898,11 @@ def render_resource_management():
     elif st.session_state.resource_view == 'add_resource':
         render_add_resource_form()
     elif st.session_state.resource_view == 'manifests':
-        st.info("📋 Manifest viewing will be available after full deployment")
-        st.markdown("**Features:**")
-        st.markdown("- View all manifests")
-        st.markdown("- Sort by Date, Item, Created By")
-        st.markdown("- Print manifests")
-        st.markdown("- Check-in shipments with barcode scanning")
+        render_manifest_list()
     elif st.session_state.resource_view == 'create_manifest':
-        st.info("📦 Manifest creation will be available after full deployment")
+        render_manifest_creation()
     else:
-        st.info("📍 Location management will be available after full deployment")
+        render_location_management()
 
     # Define page options
 
@@ -1601,7 +1913,6 @@ def main():
     if "authenticated" not in st.session_state or not st.session_state.authenticated:
         render_login_page()
         return
-
 
     st.markdown(
         """
@@ -2164,8 +2475,6 @@ def main():
                             mime="text/csv"
                         )
 
-
-
     elif page == "💻 Asset Management":
         st.header("💻 Asset Management")
         
@@ -2570,7 +2879,6 @@ def main():
                 else:
                     st.dataframe(history_df, use_container_width=True, height=300)
 
-        
         # Initialize session states
         if 'view_procurement_id' not in st.session_state:
             st.session_state.view_procurement_id = None
@@ -3077,7 +3385,6 @@ def main():
                             else:
                                 st.warning("Contact information not available")
 
-        
         with tab3:
             st.subheader("🚗 Vehicle Management")
             # Initialize session states
@@ -3780,7 +4087,6 @@ def main():
                         use_container_width=True
                     )
 
-
     # Report Builder and Connection Test
     elif page == "📈 Report Builder":
         st.header("📈 Report Builder")
@@ -4116,7 +4422,6 @@ def main():
                                         mime="text/csv",
                                         use_container_width=True
                                     )
-
 
     elif page == "🔌 Connection Test":
         st.header("🔌 Database Connection Test")
