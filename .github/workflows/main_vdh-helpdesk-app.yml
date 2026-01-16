@@ -1,39 +1,76 @@
-# Replace the existing deploy job/step(s) in your workflow with the block below.
-# This ensures the workflow checks out the full repository and deploys the entire workspace
-# (package: '.') so the fleet/ folder and other repo files are included on the Web App.
-#
-# Paste this block to replace the current `deploy:` job (the block that starts with
-# "deploy:" around line ~50 in your file). Keep the surrounding `jobs:` structure intact.
-deploy:
-  runs-on: ubuntu-latest
-  needs: build
-  permissions:
-    id-token: write    # required by actions/checkout for requesting OIDC tokens if used
-    contents: read     # required for actions/checkout
-  steps:
-    - name: Checkout repository
-      uses: actions/checkout@v4
-      with:
-        fetch-depth: 0
+# Docs for the Azure Web Apps Deploy action: https://github.com/Azure/webapps-deploy
+# More GitHub Actions for Azure: https://github.com/Azure/actions
+# More info on Python, GitHub Actions, and Azure App Service: https://aka.ms/python-webapps-actions
 
-    - name: Download artifact from build job
-      uses: actions/download-artifact@v4
-      with:
-        name: python-app
+name: Build and deploy Python app to Azure Web App - Vdh-helpdesk-app
 
-    - name: Login to Azure
-      uses: azure/login@v2
-      with:
-        # Keep the same secret names you use in the workflow or replace with your secrets
-        client-id: ${{ secrets.AZUREAPPSERVICE_CLIENTID_33166D5647ED44B795D7F269B82B9993 }}
-        tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_A5F45344A20F4DB7845FF98C82E44B3 }}
-        subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_EB69425F801B4EAD9D3C7CA5719177CD }}
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
 
-    - name: 'Deploy to Azure Web App'
-      uses: azure/webapps-deploy@v3
-      id: deploy-to-webapp
-      with:
-        app-name: 'Vdh-helpdesk-app'
-        publish-profile: ${{ secrets.AZURE_PUBLISH_PROFILE }}
-        package: '.'            # deploy the entire checked-out workspace (includes fleet/)
-        slot-name: 'Production'
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read #This is required for actions/checkout
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python version
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      # 🛠️ Local Build Section (Optional)
+      # The following section in your workflow is designed to catch build issues early on the client side, before deployment. This can be helpful for debugging and validation. However, if this step significantly increases deployment time and early detection is not critical for your workflow, you may remove this section to streamline the deployment process.
+      - name: Create and Start virtual environment and Install dependencies
+        run: |
+          python -m venv antenv
+          source antenv/bin/activate
+          pip install -r requirements.txt
+                
+      # By default, when you enable GitHub CI/CD integration through the Azure portal, the platform automatically sets the SCM_DO_BUILD_DURING_DEPLOYMENT application setting to true. This triggers the use of Oryx, a build engine that handles application compilation and dependency installation (e.g., pip install) directly on the platform during deployment. Hence, we exclude the antenv virtual environment directory from the deployment artifact to reduce the payload size. 
+      - name: Upload artifact for deployment jobs
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-app
+          path: |
+            .
+            !antenv/
+
+      # 🚫 Opting Out of Oryx Build
+      # If you prefer to disable the Oryx build process during deployment, follow these steps:
+      # 1. Remove the SCM_DO_BUILD_DURING_DEPLOYMENT app setting from your Azure App Service Environment variables.
+      # 2. Refer to sample workflows for alternative deployment strategies: https://github.com/Azure/actions-workflow-samples/tree/master/AppService
+      
+
+  deploy:
+    runs-on: ubuntu-latest
+    needs: build
+    permissions:
+      id-token: write #This is required for requesting the JWT
+      contents: read #This is required for actions/checkout
+
+    steps:
+      - name: Download artifact from build job
+        uses: actions/download-artifact@v4
+        with:
+          name: python-app
+      
+      - name: Login to Azure
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZUREAPPSERVICE_CLIENTID_C9EA73AE67FF446B8445C5DBF8CE78F6 }}
+          tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_D1ABAFB483BD41DDA1C1F33659A67C8F }}
+          subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_15C3BE08F971472DA1D807ADF63E85AF }}
+
+      - name: 'Deploy to Azure Web App'
+        uses: azure/webapps-deploy@v3
+        id: deploy-to-webapp
+        with:
+          app-name: 'Vdh-helpdesk-app'
+          slot-name: 'Production'
+          
