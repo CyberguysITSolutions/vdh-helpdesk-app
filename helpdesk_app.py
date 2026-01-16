@@ -2760,7 +2760,6 @@ def main():
                             
                             photo_url = None
                             if uploaded_file is not None:
-                                import base64
                                 bytes_data = uploaded_file.getvalue()
                                 base64_image = base64.b64encode(bytes_data).decode()
                                 photo_url = f"data:image/{uploaded_file.type.split('/')[1]};base64,{base64_image}"
@@ -2864,7 +2863,6 @@ def main():
                             
                             photo_url = current_photo
                             if uploaded_file is not None:
-                                import base64
                                 bytes_data = uploaded_file.getvalue()
                                 base64_image = base64.b64encode(bytes_data).decode()
                                 photo_url = f"data:image/{uploaded_file.type.split('/')[1]};base64,{base64_image}"
