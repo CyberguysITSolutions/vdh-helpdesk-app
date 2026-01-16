@@ -1290,16 +1290,22 @@ def main():
     except Exception:
         st.caption("UI tweak script not applied.")
 
-    # VDH Logo - Direct SVG (fixed: removed via.placeholder.com which was causing blank screens)
-    
-    svg = """
-    <svg width="200" height="80" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="VDH">
-      <rect width="200" height="80" fill="#002855" rx="6" ry="6"/>
-      <text x="100" y="50" font-family="Arial, Helvetica, sans-serif" font-size="16" fill="#FFFFFF" text-anchor="middle">VDH Service Center</text>
-    </svg>
-    """
-    b64 = base64.b64encode(svg.encode("utf-8")).decode("utf-8")
-    st.sidebar.markdown(f'<img src="data:image/svg+xml;base64,{b64}" width="200" alt="VDH logo">', unsafe_allow_html=True)
+    placeholder_text = quote("VDH")
+    logo_url = f"https://via.placeholder.com/200x80/002855/FFFFFF.png?text={placeholder_text}"
+    try:
+        st.sidebar.image(logo_url, width=200)
+    except Exception:
+        try:
+            safe_st_image(logo_url, width=200)
+        except Exception:
+            svg = """
+            <svg width="200" height="80" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="VDH">
+              <rect width="200" height="80" fill="#002855" rx="6" ry="6"/>
+              <text x="100" y="50" font-family="Arial, Helvetica, sans-serif" font-size="16" fill="#FFFFFF" text-anchor="middle">VDH Service Center</text>
+            </svg>
+            """
+            b64 = base64.b64encode(svg.encode("utf-8")).decode("utf-8")
+            st.sidebar.markdown(f'<img src="data:image/svg+xml;base64,{b64}" width="200" alt="VDH logo">', unsafe_allow_html=True)
 
     st.sidebar.title("VDH Service Center")
 
@@ -2760,6 +2766,7 @@ def main():
                             
                             photo_url = None
                             if uploaded_file is not None:
+                                import base64
                                 bytes_data = uploaded_file.getvalue()
                                 base64_image = base64.b64encode(bytes_data).decode()
                                 photo_url = f"data:image/{uploaded_file.type.split('/')[1]};base64,{base64_image}"
@@ -2863,6 +2870,7 @@ def main():
                             
                             photo_url = current_photo
                             if uploaded_file is not None:
+                                import base64
                                 bytes_data = uploaded_file.getvalue()
                                 base64_image = base64.b64encode(bytes_data).decode()
                                 photo_url = f"data:image/{uploaded_file.type.split('/')[1]};base64,{base64_image}"
