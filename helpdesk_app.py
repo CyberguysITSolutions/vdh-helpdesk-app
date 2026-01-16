@@ -1227,8 +1227,381 @@ def get_pending_counts(db_available=False):
     
     return counts
 
+
+# =====================================================
+# RESOURCE MANAGEMENT HELPER FUNCTIONS
+# =====================================================
+
+def get_resource_categories():
+    """Get all active resource categories"""
+    query = "SELECT category_id, category_name, icon FROM dbo.resource_categories WHERE is_active = 1 ORDER BY category_name"
+    df, err = execute_query(query)
+    return df if err is None else pd.DataFrame()
+
+def get_resource_locations():
+    """Get all active locations"""
+    query = "SELECT location_id, location_name, location_type FROM dbo.resource_locations WHERE is_active = 1 ORDER BY location_name"
+    df, err = execute_query(query)
+    return df if err is None else pd.DataFrame()
+
+def get_resources_by_category(category_id=None):
+    """Get resources, optionally filtered by category"""
+    if category_id:
+        query = """
+            SELECT r.resource_id, r.resource_name, r.upc_code, r.unit_of_measure,
+                   rc.category_name, rc.icon
+            FROM dbo.resources r
+            INNER JOIN dbo.resource_categories rc ON r.category_id = rc.category_id
+            WHERE r.is_active = 1 AND r.category_id = ?
+            ORDER BY r.resource_name
+        """
+        df, err = execute_query(query, (category_id,))
+    else:
+        query = """
+            SELECT r.resource_id, r.resource_name, r.upc_code, r.unit_of_measure,
+                   rc.category_name, rc.icon
+            FROM dbo.resources r
+            INNER JOIN dbo.resource_categories rc ON r.category_id = rc.category_id
+            WHERE r.is_active = 1
+            ORDER BY rc.category_name, r.resource_name
+        """
+        df, err = execute_query(query)
+    return df if err is None else pd.DataFrame()
+
+def get_inventory_by_location(location_id):
+    """Get inventory for a specific location"""
+    query = """
+        SELECT r.resource_id, r.resource_name, r.upc_code, rc.category_name,
+               i.quantity_on_hand, i.quantity_allocated, i.quantity_available,
+               r.reorder_level, r.unit_of_measure
+        FROM dbo.resource_inventory i
+        INNER JOIN dbo.resources r ON i.resource_id = r.resource_id
+        INNER JOIN dbo.resource_categories rc ON r.category_id = rc.category_id
+        WHERE i.location_id = ? AND r.is_active = 1
+        ORDER BY rc.category_name, r.resource_name
+    """
+    df, err = execute_query(query, (location_id,))
+    return df if err is None else pd.DataFrame()
+
+# =====================================================
+# LOGIN PAGE - Wakes up DB
+# =====================================================
+
+def render_login_page():
+    """Simple login page to wake up database"""
+    st.title("🏥 VDH Service Center")
+    st.markdown("### Welcome to the VDH Helpdesk System")
+    st.markdown("---")
+    
+    # Try to connect to database to wake it up
+    if "db_woken" not in st.session_state:
+        with st.spinner("Connecting to database..."):
+            try:
+                import time
+                time.sleep(1)
+                conn = get_db_connection()
+                conn.close()
+                st.session_state.db_woken = True
+                st.success("✅ Database connection established")
+            except Exception as e:
+                st.warning("Database is warming up... Please wait and try again.")
+                logger.info(f"DB wake attempt: {e}")
+    
+    st.markdown("---")
+    
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
+        st.markdown("### Sign In")
+        
+        with st.form("login_form"):
+            username = st.text_input("Username", placeholder="Enter your username")
+            password = st.text_input("Password", type="password", placeholder="Enter your password")
+            
+            submit = st.form_submit_button("🔐 Sign In", use_container_width=True, type="primary")
+            
+            if submit:
+                if username and password:
+                    st.session_state.authenticated = True
+                    st.session_state.username = username
+                    st.rerun()
+                else:
+                    st.error("⚠️ Please enter both username and password")
+        
+        st.markdown("---")
+        st.caption("Having trouble logging in? Contact IT Help Desk")
+
+# =====================================================
+# RESOURCE MANAGEMENT RENDER FUNCTIONS
+# =====================================================
+
+def render_add_resource_form():
+    """Form to add new resource with UPC support"""
+    st.subheader("➕ Add New Resource")
+    
+    categories_df = get_resource_categories()
+    if categories_df.empty:
+        st.error("No categories available. Please add categories first.")
+        return
+    
+    with st.form("add_resource_form"):
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            resource_name = st.text_input("Resource Name *", placeholder="e.g., Feed More Food Box - Standard")
+            category_id = st.selectbox(
+                "Category *",
+                options=categories_df['category_id'].tolist(),
+                format_func=lambda x: categories_df[categories_df['category_id']==x]['category_name'].values[0]
+            )
+            upc_code = st.text_input("UPC/Barcode *", placeholder="Scan or enter UPC code", help="Scan with barcode gun or enter manually")
+            
+        with col2:
+            sku = st.text_input("SKU", placeholder="Optional SKU/Item Number")
+            unit_of_measure = st.selectbox("Unit of Measure *", ['box', 'kit', 'pack', 'case', 'unit', 'each'])
+            reorder_level = st.number_input("Reorder Level", min_value=0, value=50, help="Alert when stock falls below this number")
+        
+        description = st.text_area("Description", placeholder="Optional notes about this resource")
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            submit = st.form_submit_button("💾 Add Resource", use_container_width=True, type="primary")
+        with col2:
+            cancel = st.form_submit_button("❌ Cancel", use_container_width=True)
+        
+        if cancel:
+            st.session_state.resource_view = 'dashboard'
+            st.rerun()
+        
+        if submit:
+            if not resource_name or not upc_code:
+                st.error("⚠️ Please fill in all required fields")
+            else:
+                user = st.session_state.get('user', {})
+                created_by = f"{user.get('first_name', '')} {user.get('last_name', '')}".strip() or user.get('username', 'Unknown')
+                
+                insert_query = """
+                    INSERT INTO dbo.resources (resource_name, category_id, upc_code, sku, description, 
+                                              unit_of_measure, reorder_level, created_by, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, GETDATE())
+                """
+                
+                result, err = execute_non_query(insert_query, (
+                    resource_name, category_id, upc_code, sku, description,
+                    unit_of_measure, reorder_level, created_by
+                ))
+                
+                if err:
+                    if 'duplicate' in str(err).lower() or 'unique' in str(err).lower():
+                        st.error(f"❌ UPC Code '{upc_code}' already exists in the system")
+                    else:
+                        st.error(f"❌ Error adding resource: {err}")
+                else:
+                    st.success(f"✅ Resource '{resource_name}' added successfully!")
+                    
+                    # Initialize inventory at all locations
+                    get_resource_id_query = "SELECT resource_id FROM dbo.resources WHERE upc_code = ?"
+                    resource_df, _ = execute_query(get_resource_id_query, (upc_code,))
+                    if not resource_df.empty:
+                        resource_id = resource_df.iloc[0]['resource_id']
+                        locations_df = get_resource_locations()
+                        for _, loc in locations_df.iterrows():
+                            init_inventory_query = """
+                                INSERT INTO dbo.resource_inventory (resource_id, location_id, quantity_on_hand, updated_by, updated_at)
+                                VALUES (?, ?, 0, ?, GETDATE())
+                            """
+                            execute_non_query(init_inventory_query, (resource_id, loc['location_id'], created_by))
+                    
+                    import time
+                    time.sleep(1)
+                    st.session_state.resource_view = 'inventory'
+                    st.rerun()
+
+# =====================================================
+# SECTION 2: INVENTORY MANAGEMENT
+# =====================================================
+
+
+def render_inventory_management():
+    """View and manage inventory levels"""
+    st.subheader("📦 Inventory Management")
+    
+    locations_df = get_resource_locations()
+    if locations_df.empty:
+        st.warning("No locations configured")
+        return
+    
+    col1, col2, col3 = st.columns([2, 2, 1])
+    with col1:
+        selected_location_id = st.selectbox(
+            "Select Location",
+            options=locations_df['location_id'].tolist(),
+            format_func=lambda x: locations_df[locations_df['location_id']==x]['location_name'].values[0]
+        )
+    with col2:
+        if st.button("🔄 Refresh Inventory"):
+            st.rerun()
+    with col3:
+        if st.button("➕ Adjust Stock"):
+            st.session_state.show_adjust_form = True
+    
+    inventory_df = get_inventory_by_location(selected_location_id)
+    
+    if inventory_df.empty:
+        st.info("No inventory items for this location")
+        return
+    
+    # Summary cards
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        st.metric("Total Items", len(inventory_df))
+    with col2:
+        total_stock = inventory_df['quantity_on_hand'].sum()
+        st.metric("Total Stock", f"{total_stock:,}")
+    with col3:
+        low_stock = len(inventory_df[inventory_df['quantity_available'] <= inventory_df['reorder_level']])
+        st.metric("Low Stock Items", low_stock, delta=-low_stock if low_stock > 0 else None)
+    with col4:
+        out_of_stock = len(inventory_df[inventory_df['quantity_available'] == 0])
+        st.metric("Out of Stock", out_of_stock, delta=-out_of_stock if out_of_stock > 0 else None)
+    
+    inventory_df['status'] = inventory_df.apply(
+        lambda row: '🔴 Out of Stock' if row['quantity_available'] == 0 
+        else '🟡 Low Stock' if row['quantity_available'] <= row['reorder_level']
+        else '🟢 In Stock',
+        axis=1
+    )
+    
+    st.markdown("### Current Inventory")
+    st.dataframe(
+        inventory_df[['resource_name', 'category_name', 'quantity_on_hand', 'quantity_allocated', 
+                      'quantity_available', 'reorder_level', 'status', 'unit_of_measure']],
+        use_container_width=True,
+        hide_index=True
+    )
+
+# =====================================================
+# SECTION 3: RESOURCE DASHBOARD
+# =====================================================
+
+
+def render_resource_dashboard():
+    """Dashboard with key metrics"""
+    st.subheader("📊 Resource Management Dashboard")
+    
+    col1, col2, col3, col4 = st.columns(4)
+    
+    total_resources_query = "SELECT COUNT(*) as count FROM dbo.resources WHERE is_active = 1"
+    total_resources_df, _ = execute_query(total_resources_query)
+    with col1:
+        count = total_resources_df.iloc[0]['count'] if not total_resources_df.empty else 0
+        st.metric("Total Resources", count)
+    
+    total_inventory_query = "SELECT SUM(quantity_on_hand) as total FROM dbo.resource_inventory"
+    total_inventory_df, _ = execute_query(total_inventory_query)
+    with col2:
+        total = total_inventory_df.iloc[0]['total'] if not total_inventory_df.empty else 0
+        st.metric("Total Stock", f"{total:,.0f}")
+    
+    pending_query = "SELECT COUNT(*) as count FROM dbo.resource_shipments WHERE status IN ('Pending', 'In Transit')"
+    pending_df, _ = execute_query(pending_query)
+    with col3:
+        pending = pending_df.iloc[0]['count'] if not pending_df.empty else 0
+        st.metric("Pending Shipments", pending)
+    
+    low_stock_query = """
+        SELECT COUNT(*) as count 
+        FROM dbo.resource_inventory i
+        INNER JOIN dbo.resources r ON i.resource_id = r.resource_id
+        WHERE i.quantity_available <= r.reorder_level AND r.is_active = 1
+    """
+    low_stock_df, _ = execute_query(low_stock_query)
+    with col4:
+        low = low_stock_df.iloc[0]['count'] if not low_stock_df.empty else 0
+        st.metric("Low Stock Alerts", low, delta=-low if low > 0 else None)
+
+# =====================================================
+# SECTION 4: MAIN RESOURCE MANAGEMENT PAGE
+# =====================================================
+
+
+def render_resource_management():
+    """Main Resource Management page"""
+    
+    if 'resource_view' not in st.session_state:
+        st.session_state.resource_view = 'dashboard'
+    
+    st.title("📦 Resource Management")
+    st.markdown("*Population Health Distribution System*")
+    st.markdown("---")
+    
+    col1, col2, col3, col4, col5, col6 = st.columns(6)
+    
+    with col1:
+        if st.button("📊 Dashboard", use_container_width=True, 
+                    type="primary" if st.session_state.resource_view == 'dashboard' else "secondary"):
+            st.session_state.resource_view = 'dashboard'
+            st.rerun()
+    
+    with col2:
+        if st.button("📦 Inventory", use_container_width=True,
+                    type="primary" if st.session_state.resource_view == 'inventory' else "secondary"):
+            st.session_state.resource_view = 'inventory'
+            st.rerun()
+    
+    with col3:
+        if st.button("📋 Manifests", use_container_width=True,
+                    type="primary" if st.session_state.resource_view == 'manifests' else "secondary"):
+            st.session_state.resource_view = 'manifests'
+            st.rerun()
+    
+    with col4:
+        if st.button("➕ New Resource", use_container_width=True,
+                    type="primary" if st.session_state.resource_view == 'add_resource' else "secondary"):
+            st.session_state.resource_view = 'add_resource'
+            st.rerun()
+    
+    with col5:
+        if st.button("📦 New Manifest", use_container_width=True,
+                    type="primary" if st.session_state.resource_view == 'create_manifest' else "secondary"):
+            st.session_state.resource_view = 'create_manifest'
+            st.rerun()
+    
+    with col6:
+        if st.button("📍 Locations", use_container_width=True,
+                    type="primary" if st.session_state.resource_view == 'locations' else "secondary"):
+            st.session_state.resource_view = 'locations'
+            st.rerun()
+    
+    st.markdown("---")
+    
+    if st.session_state.resource_view == 'dashboard':
+        render_resource_dashboard()
+    elif st.session_state.resource_view == 'inventory':
+        render_inventory_management()
+    elif st.session_state.resource_view == 'add_resource':
+        render_add_resource_form()
+    elif st.session_state.resource_view == 'manifests':
+        st.info("📋 Manifest viewing will be available after full deployment")
+        st.markdown("**Features:**")
+        st.markdown("- View all manifests")
+        st.markdown("- Sort by Date, Item, Created By")
+        st.markdown("- Print manifests")
+        st.markdown("- Check-in shipments with barcode scanning")
+    elif st.session_state.resource_view == 'create_manifest':
+        st.info("📦 Manifest creation will be available after full deployment")
+    else:
+        st.info("📍 Location management will be available after full deployment")
+
+    # Define page options
+
 def main():
     st.set_page_config(page_title="VDH Service Center", page_icon="🏥", layout="wide")
+
+    # Check authentication
+    if "authenticated" not in st.session_state or not st.session_state.authenticated:
+        render_login_page()
+        return
+
 
     st.markdown(
         """
@@ -1379,12 +1752,14 @@ def main():
     pending_counts = get_pending_counts(DB_AVAILABLE)
     
     # Define page options
+    # Define page options
     page_options = [
         "📊 Dashboard",
         "🎫 Helpdesk Tickets",
         "💻 Asset Management",
         "🛒 Procurement Requests",
         "🚗 Fleet Management",
+        "📦 Resource Management",
         "📈 Report Builder",
         "🔌 Connection Test",
     ]
@@ -3758,6 +4133,9 @@ def main():
             st.success("Database appears to be reachable (connection established during startup check).")
         else:
             st.error("Database is not reachable. Check configuration and network.")
+
+    elif page == "📦 Resource Management":
+        render_resource_management()
 
     st.markdown("---")
     st.markdown("*VDH Service Center - Comprehensive Management System | Virginia Department of Health © 2025*")
