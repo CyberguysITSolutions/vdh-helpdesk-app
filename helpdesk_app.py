@@ -2761,7 +2761,7 @@ def main():
                     requester_email,
                     location,
                     total_amount,
-                    description,
+                    
                     status,
                     approval_1_status,
                     approval_2_status
@@ -2957,6 +2957,23 @@ def main():
                     with col3:
                         total = procurement.get('total_amount', 0)
                         st.metric("Total", f"${total:,.2f}" if total else "N/A")
+                    
+                    # Delete button for draft requests
+                    if status and status.lower() == "draft":
+                        st.markdown("---")
+                        col1, col2, col3 = st.columns([2, 1, 1])
+                        with col3:
+                            if st.button("🗑️ Delete Draft", type="secondary", use_container_width=True, key="delete_draft_btn"):
+                                delete_query = "DELETE FROM dbo.Procurement_Requests WHERE request_id = ?"
+                                result, err = execute_non_query(delete_query, (st.session_state.view_procurement_id,))
+                                if err:
+                                    st.error(f"❌ Error deleting draft: {err}")
+                                else:
+                                    st.success("✅ Draft deleted successfully!")
+                                    del st.session_state["view_procurement_id"]
+                                    import time
+                                    time.sleep(1)
+                                    st.rerun()
                     
                     st.markdown("---")
                     
