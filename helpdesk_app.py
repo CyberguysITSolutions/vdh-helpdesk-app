@@ -1734,23 +1734,37 @@ def render_manifest_creation():
     if inventory_df.empty:
         st.warning("No inventory available at source location")
     else:
+        # Filter to only show items with available quantity > 0
+        available_items_df = inventory_df[inventory_df['quantity_available'] > 0]
+        
+        if available_items_df.empty:
+            st.warning("No inventory items with available stock at this location")
+            col1, col2 = st.columns([2, 1])
+            with col2:
+                if st.button("❌ Cancel", use_container_width=True):
+                    st.session_state.manifest_items = []
+                    st.session_state.manifest_notes = ""
+                    st.session_state.resource_view = 'dashboard'
+                    st.rerun()
+            return
+        
         col1, col2, col3 = st.columns([3, 2, 2])
         
         with col1:
             resource_name = st.selectbox(
                 "Select Resource",
-                options=inventory_df['resource_name'].tolist(),
+                options=available_items_df['resource_name'].tolist(),
                 key="manifest_resource_selector"
             )
         
-        selected_row = inventory_df[inventory_df['resource_name'] == resource_name].iloc[0]
+        selected_row = available_items_df[available_items_df['resource_name'] == resource_name].iloc[0]
         available_qty = int(selected_row['quantity_available'])
         
         with col2:
             st.metric("Available", f"{available_qty} {selected_row['unit_of_measure']}")
         
         with col3:
-            quantity = st.number_input("Quantity", min_value=1, max_value=max(1, available_qty), value=min(1, available_qty), key="manifest_qty")
+            quantity = st.number_input("Quantity", min_value=1, max_value=available_qty, value=1, key="manifest_qty")
         
         if st.button("➕ Add to Manifest", type="primary", use_container_width=True):
             st.session_state.manifest_items.append({
