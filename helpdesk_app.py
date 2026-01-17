@@ -1306,26 +1306,73 @@ def render_login_page():
     
     st.markdown("---")
     
+    # Initialize password reset state
+    if "show_password_reset" not in st.session_state:
+        st.session_state.show_password_reset = False
+    
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
-        st.markdown("### Sign In")
-        
-        with st.form("login_form"):
-            username = st.text_input("Username", placeholder="Enter your username")
-            password = st.text_input("Password", type="password", placeholder="Enter your password")
+        if not st.session_state.show_password_reset:
+            # Login form
+            st.markdown("### Sign In")
             
-            submit = st.form_submit_button("🔐 Sign In", use_container_width=True, type="primary")
+            with st.form("login_form"):
+                username = st.text_input("Username", placeholder="Enter your username")
+                password = st.text_input("Password", type="password", placeholder="Enter your password")
+                
+                submit = st.form_submit_button("🔐 Sign In", use_container_width=True, type="primary")
+                
+                if submit:
+                    if username and password:
+                        st.session_state.authenticated = True
+                        st.session_state.username = username
+                        st.balloons()
+                        st.success("✅ Login successful! Redirecting...")
+                        import time
+                        time.sleep(1)
+                        st.rerun()
+                    else:
+                        st.error("⚠️ Please enter both username and password")
             
-            if submit:
-                if username and password:
-                    st.session_state.authenticated = True
-                    st.session_state.username = username
+            st.markdown("---")
+            
+            # Password reset link
+            col_a, col_b, col_c = st.columns([1, 2, 1])
+            with col_b:
+                if st.button("🔑 Forgot Password?", use_container_width=True):
+                    st.session_state.show_password_reset = True
                     st.rerun()
-                else:
-                    st.error("⚠️ Please enter both username and password")
+            
+            st.caption("Having trouble logging in? Contact IT Help Desk")
         
-        st.markdown("---")
-        st.caption("Having trouble logging in? Contact IT Help Desk")
+        else:
+            # Password reset form
+            st.markdown("### Reset Password")
+            st.info("Enter your email address and we will send you instructions to reset your password.")
+            
+            with st.form("password_reset_form"):
+                email = st.text_input("Email Address", placeholder="your.email@vdh.virginia.gov")
+                
+                col1, col2 = st.columns(2)
+                with col1:
+                    reset_submit = st.form_submit_button("📧 Send Reset Link", type="primary", use_container_width=True)
+                with col2:
+                    cancel = st.form_submit_button("← Back to Login", use_container_width=True)
+                
+                if cancel:
+                    st.session_state.show_password_reset = False
+                    st.rerun()
+                
+                if reset_submit:
+                    if email and "@" in email:
+                        st.success(f"✅ Password reset instructions have been sent to {email}")
+                        st.info("Please check your email and follow the instructions to reset your password.")
+                        import time
+                        time.sleep(3)
+                        st.session_state.show_password_reset = False
+                        st.rerun()
+                    else:
+                        st.error("⚠️ Please enter a valid email address")
 
 # =====================================================
 # RESOURCE MANAGEMENT RENDER FUNCTIONS
@@ -2026,6 +2073,38 @@ def main():
             st.sidebar.markdown(f'<img src="data:image/svg+xml;base64,{b64}" width="200" alt="VDH logo">', unsafe_allow_html=True)
 
     st.sidebar.title("VDH Service Center")
+
+    # User profile section
+    username = st.session_state.get("username", "User")
+    st.sidebar.markdown(f"### 👤 {username}")
+    if st.sidebar.button("🚪 Logout", use_container_width=True, key="logout_btn"):
+        # Clear session state
+        for key in list(st.session_state.keys()):
+            del st.session_state[key]
+        st.rerun()
+    st.sidebar.markdown("---")
+    
+    # VDH Landing Page Link
+    st.sidebar.markdown("### 🏠 Quick Links")
+    st.sidebar.markdown("""
+        <a href="https://www.vdh.virginia.gov" target="_blank" style="
+            display: inline-block;
+            width: 100%;
+            padding: 0.5rem 1rem;
+            background-color: #002855;
+            color: white;
+            text-decoration: none;
+            border-radius: 0.5rem;
+            text-align: center;
+            font-weight: 500;
+            margin-bottom: 0.5rem;
+        ">
+            🌐 VDH Landing Page
+        </a>
+    """, unsafe_allow_html=True)
+    
+    st.sidebar.markdown("---")
+
 
     with st.sidebar:
         st.markdown("---")
