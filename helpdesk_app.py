@@ -1531,6 +1531,608 @@ def render_inventory_management():
 # SECTION 3: RESOURCE DASHBOARD
 # =====================================================
 
+from datetime import datetime, timedelta
+import base64
+
+# ==========================================
+# MANIFEST MANAGEMENT FUNCTIONS
+# ==========================================
+
+def log_manifest_activity(manifest_id, activity_type, details, user):
+    """Log all manifest activity for reporting"""
+    log_query = """
+        INSERT INTO dbo.manifest_activity_log 
+        (manifest_id, activity_type, activity_details, performed_by, activity_date)
+        VALUES (?, ?, ?, ?, GETDATE())
+    """
+    execute_non_query(log_query, (manifest_id, activity_type, details, user))
+
+def render_signature_capture():
+    """Render signature capture with both draw and type options"""
+    st.markdown("### ✍️ Delivery Signature Required")
+    st.info("📋 A signature is required to mark this manifest as delivered")
+    
+    sig_method = st.radio(
+        "Signature Method", 
+        ["✍️ Type Signature", "🎨 Draw Signature (Tablet/Stylus)"], 
+        horizontal=True,
+        key="sig_method"
+    )
+    
+    signature_data = None
+    signature_type = None
+    
+    if sig_method == "✍️ Type Signature":
+        st.markdown("**Electronic Signature**")
+        typed_signature = st.text_input(
+            "Full Name", 
+            placeholder="Enter your full name",
+            key="typed_sig"
+        )
+        
+        if typed_signature:
+            # Display signature preview
+            st.markdown(f"""
+                <div style="
+                    border: 2px solid #002855; 
+                    padding: 30px; 
+                    background: linear-gradient(to bottom, #ffffff 0%, #f8f9fa 100%); 
+                    border-radius: 8px; 
+                    margin-top: 15px;
+                    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+                ">
+                    <p style="
+                        font-family: 'Brush Script MT', 'Lucida Handwriting', cursive; 
+                        font-size: 32px; 
+                        margin: 0;
+                        color: #002855;
+                        text-align: center;
+                    ">
+                        {typed_signature}
+                    </p>
+                    <hr style="border: 1px solid #002855; margin: 15px 0;">
+                    <p style="
+                        font-size: 11px; 
+                        color: #666; 
+                        margin: 5px 0;
+                        text-align: center;
+                    ">
+                        Electronic Signature - {datetime.now().strftime("%B %d, %Y at %I:%M %p")}
+                    </p>
+                    <p style="
+                        font-size: 10px; 
+                        color: #999; 
+                        margin: 0;
+                        text-align: center;
+                        font-style: italic;
+                    ">
+                        By signing, I acknowledge receipt of the items listed in this manifest
+                    </p>
+                </div>
+            """, unsafe_allow_html=True)
+            
+            signature_data = typed_signature
+            signature_type = "typed"
+    
+    else:  # Draw Signature
+        st.markdown("**Draw Your Signature**")
+        st.info("🖊️ Use your stylus, finger, or mouse to sign below")
+        
+        # Simple drawing canvas using HTML5 canvas
+        signature_html = """
+        <div style="border: 2px solid #002855; border-radius: 8px; padding: 10px; background: white;">
+            <canvas id="signatureCanvas" width="600" height="200" style="border: 1px dashed #ccc; cursor: crosshair; background: white; width: 100%;"></canvas>
+            <div style="margin-top: 10px;">
+                <button onclick="clearCanvas()" style="padding: 8px 16px; background: #dc3545; color: white; border: none; border-radius: 4px; cursor: pointer;">Clear</button>
+                <span id="signatureStatus" style="margin-left: 15px; color: #666;"></span>
+            </div>
+        </div>
+        
+        <script>
+        const canvas = document.getElementById('signatureCanvas');
+        const ctx = canvas.getContext('2d');
+        let drawing = false;
+        let hasSignature = false;
+        
+        // Set canvas actual size
+        canvas.width = 600;
+        canvas.height = 200;
+        
+        function startDrawing(e) {
+            drawing = true;
+            hasSignature = true;
+            const rect = canvas.getBoundingClientRect();
+            const x = (e.clientX || e.touches[0].clientX) - rect.left;
+            const y = (e.clientY || e.touches[0].clientY) - rect.top;
+            ctx.beginPath();
+            ctx.moveTo(x * (canvas.width / rect.width), y * (canvas.height / rect.height));
+            document.getElementById('signatureStatus').innerText = '✓ Signature captured';
+            document.getElementById('signatureStatus').style.color = '#28a745';
+        }
+        
+        function draw(e) {
+            if (!drawing) return;
+            e.preventDefault();
+            
+            const rect = canvas.getBoundingClientRect();
+            const x = (e.clientX || e.touches[0].clientX) - rect.left;
+            const y = (e.clientY || e.touches[0].clientY) - rect.top;
+            
+            ctx.lineWidth = 2;
+            ctx.lineCap = 'round';
+            ctx.strokeStyle = '#002855';
+            ctx.lineTo(x * (canvas.width / rect.width), y * (canvas.height / rect.height));
+            ctx.stroke();
+        }
+        
+        function stopDrawing() {
+            drawing = false;
+            ctx.beginPath();
+            if (hasSignature) {
+                // Store signature as base64
+                const dataURL = canvas.toDataURL('image/png');
+                localStorage.setItem('manifestSignature', dataURL);
+            }
+        }
+        
+        function clearCanvas() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            hasSignature = false;
+            localStorage.removeItem('manifestSignature');
+            document.getElementById('signatureStatus').innerText = '';
+        }
+        
+        canvas.addEventListener('mousedown', startDrawing);
+        canvas.addEventListener('mousemove', draw);
+        canvas.addEventListener('mouseup', stopDrawing);
+        canvas.addEventListener('touchstart', startDrawing);
+        canvas.addEventListener('touchmove', draw);
+        canvas.addEventListener('touchend', stopDrawing);
+        
+        // Prevent scrolling when touching the canvas
+        canvas.addEventListener('touchstart', function(e) { e.preventDefault(); }, { passive: false });
+        canvas.addEventListener('touchmove', function(e) { e.preventDefault(); }, { passive: false });
+        </script>
+        """
+        
+        st.components.v1.html(signature_html, height=280)
+        
+        # For drawn signatures, we'll use a text confirmation instead
+        drawn_confirm = st.text_input(
+            "Type your name to confirm the drawn signature",
+            placeholder="Confirm signature by typing your name",
+            key="drawn_confirm"
+        )
+        
+        if drawn_confirm:
+            signature_data = f"[Signature] {drawn_confirm}"
+            signature_type = "drawn"
+            st.success("✅ Signature confirmed")
+    
+    return signature_data, signature_type
+
+def render_manifest_list():
+    """Display all manifests with status management and New Manifest button"""
+    st.subheader("📋 Manifest Management")
+    
+    # Top controls with New Manifest button
+    col1, col2, col3, col4 = st.columns([2, 2, 1, 1])
+    with col1:
+        status_filter = st.selectbox(
+            "Filter by Status", 
+            ["All", "Staged", "In Transit", "Delivered"],
+            key="manifest_status_filter"
+        )
+    with col2:
+        date_filter = st.date_input(
+            "From Date", 
+            value=datetime.now() - timedelta(days=30),
+            key="manifest_date_filter"
+        )
+    with col3:
+        if st.button("🔄 Refresh", use_container_width=True):
+            st.rerun()
+    with col4:
+        if st.button("📦 New Manifest", type="primary", use_container_width=True):
+            st.session_state.resource_view = 'create_manifest'
+            st.rerun()
+    
+    st.markdown("---")
+    
+    # Build query
+    query = """
+        SELECT m.manifest_id, m.manifest_number, m.shipment_date,
+               COALESCE(fl.location_name, m.from_location_name) as from_location,
+               COALESCE(tl.location_name, m.to_location_name) as to_location,
+               m.status, m.created_by, m.created_at,
+               m.signature_name, m.signature_type, m.delivered_at, m.delivered_by
+        FROM dbo.resource_manifests m
+        LEFT JOIN dbo.resource_locations fl ON m.from_location_id = fl.location_id
+        LEFT JOIN dbo.resource_locations tl ON m.to_location_id = tl.location_id
+        WHERE m.shipment_date >= ?
+    """
+    
+    params = [date_filter]
+    
+    if status_filter != "All":
+        query += " AND m.status = ?"
+        params.append(status_filter)
+    
+    query += " ORDER BY m.created_at DESC"
+    
+    df, err = execute_query(query, tuple(params))
+    
+    if err:
+        st.error(f"Error loading manifests: {err}")
+        return
+    
+    if df is None or df.empty:
+        st.info("📦 No manifests found. Click 'New Manifest' to create your first one.")
+        return
+    
+    # Summary metrics
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        st.metric("📦 Total Manifests", len(df))
+    with col2:
+        staged = len(df[df['status'] == 'Staged'])
+        st.metric("🟡 Staged", staged)
+    with col3:
+        in_transit = len(df[df['status'] == 'In Transit'])
+        st.metric("🔵 In Transit", in_transit)
+    with col4:
+        delivered = len(df[df['status'] == 'Delivered'])
+        st.metric("🟢 Delivered", delivered)
+    
+    st.markdown("---")
+    
+    # Display each manifest
+    for _, manifest in df.iterrows():
+        status_icons = {"Staged": "🟡", "In Transit": "🔵", "Delivered": "🟢"}
+        icon = status_icons.get(manifest['status'], "⚪")
+        
+        with st.expander(
+            f"{icon} {manifest['manifest_number']} - {manifest['from_location']} → {manifest['to_location']} ({manifest['status']})",
+            expanded=False
+        ):
+            # Manifest details
+            col1, col2, col3 = st.columns(3)
+            
+            with col1:
+                st.markdown("**Locations**")
+                st.write(f"📤 From: {manifest['from_location']}")
+                st.write(f"📥 To: {manifest['to_location']}")
+            
+            with col2:
+                st.markdown("**Timeline**")
+                st.write(f"📅 Shipment Date: {manifest['shipment_date']}")
+                st.write(f"👤 Created By: {manifest['created_by']}")
+                st.write(f"🕐 Created: {manifest['created_at'].strftime('%Y-%m-%d %H:%M')}")
+            
+            with col3:
+                st.markdown("**Status**")
+                st.write(f"{icon} {manifest['status']}")
+                if manifest['status'] == 'Delivered' and manifest['signature_name']:
+                    st.write(f"✍️ Signed By: {manifest['signature_name']}")
+                    st.write(f"📅 Delivered: {manifest['delivered_at'].strftime('%Y-%m-%d %H:%M')}")
+            
+            st.markdown("---")
+            
+            # Status transition buttons
+            manifest_id = manifest['manifest_id']
+            current_status = manifest['status']
+            username = st.session_state.get('username', 'Unknown')
+            
+            col1, col2, col3, col4 = st.columns([2, 2, 2, 2])
+            
+            if current_status == "Staged":
+                with col1:
+                    if st.button(f"🚚 Mark In Transit", key=f"transit_{manifest_id}", use_container_width=True):
+                        update_query = "UPDATE dbo.resource_manifests SET status = 'In Transit' WHERE manifest_id = ?"
+                        result, err = execute_non_query(update_query, (manifest_id,))
+                        if not err:
+                            log_manifest_activity(manifest_id, "Status Change", "Staged → In Transit", username)
+                            st.success("✅ Manifest marked as In Transit")
+                            st.rerun()
+                        else:
+                            st.error(f"Error: {err}")
+            
+            elif current_status == "In Transit":
+                # Check if signature capture is active
+                if st.session_state.get(f'show_signature_{manifest_id}', False):
+                    st.markdown("---")
+                    signature_data, signature_type = render_signature_capture()
+                    
+                    col_a, col_b, col_c = st.columns([2, 2, 2])
+                    
+                    with col_a:
+                        if signature_data and st.button(
+                            "✅ Confirm Delivery", 
+                            key=f"confirm_{manifest_id}", 
+                            type="primary",
+                            use_container_width=True
+                        ):
+                            update_query = """
+                                UPDATE dbo.resource_manifests 
+                                SET status = 'Delivered',
+                                    signature_name = ?,
+                                    signature_type = ?,
+                                    signature_data = ?,
+                                    delivered_at = GETDATE(),
+                                    delivered_by = ?
+                                WHERE manifest_id = ?
+                            """
+                            result, err = execute_non_query(
+                                update_query, 
+                                (signature_data, signature_type, signature_data, username, manifest_id)
+                            )
+                            
+                            if not err:
+                                log_manifest_activity(
+                                    manifest_id, 
+                                    "Delivered", 
+                                    f"Signed by: {signature_data} (Type: {signature_type})", 
+                                    username
+                                )
+                                st.success(f"✅ Manifest delivered! Signed by: {signature_data}")
+                                del st.session_state[f'show_signature_{manifest_id}']
+                                st.rerun()
+                            else:
+                                st.error(f"Error: {err}")
+                    
+                    with col_b:
+                        if st.button("❌ Cancel", key=f"cancel_sig_{manifest_id}", use_container_width=True):
+                            del st.session_state[f'show_signature_{manifest_id}']
+                            st.rerun()
+                else:
+                    with col1:
+                        if st.button(
+                            "📍 Mark Delivered", 
+                            key=f"deliver_{manifest_id}",
+                            use_container_width=True
+                        ):
+                            st.session_state[f'show_signature_{manifest_id}'] = True
+                            st.rerun()
+            
+            # View activity log
+            with col4:
+                if st.button("📋 Activity Log", key=f"log_{manifest_id}", use_container_width=True):
+                    log_query = """
+                        SELECT activity_type, activity_details, performed_by, 
+                               FORMAT(activity_date, 'yyyy-MM-dd HH:mm:ss') as activity_time
+                        FROM dbo.manifest_activity_log
+                        WHERE manifest_id = ?
+                        ORDER BY activity_date DESC
+                    """
+                    log_df, _ = execute_query(log_query, (manifest_id,))
+                    
+                    if log_df is not None and not log_df.empty:
+                        st.markdown("**Activity History**")
+                        st.dataframe(
+                            log_df,
+                            column_config={
+                                "activity_type": "Activity",
+                                "activity_details": "Details",
+                                "performed_by": "User",
+                                "activity_time": "Date/Time"
+                            },
+                            hide_index=True,
+                            use_container_width=True
+                        )
+                    else:
+                        st.info("No activity log entries")
+
+def render_manifest_creation():
+    """Create new manifest with Popup/Event location support"""
+    st.subheader("📦 Create New Manifest")
+    
+    # Initialize session state
+    if 'manifest_items' not in st.session_state:
+        st.session_state.manifest_items = []
+    
+    # Get locations
+    locations_df = get_resource_locations()
+    
+    # Add Popup/Event as special location
+    location_options = []
+    location_map = {}
+    
+    # Add regular locations
+    if not locations_df.empty:
+        for _, loc in locations_df.iterrows():
+            loc_id = int(loc['location_id'])
+            loc_name = loc['location_name']
+            location_options.append(loc_name)
+            location_map[loc_name] = loc_id
+    
+    # Add Popup/Event
+    location_options.append("📍 Popup/Event (Custom)")
+    location_map["📍 Popup/Event (Custom)"] = -1
+    
+    st.markdown("### 📋 Shipment Details")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        from_location_name = st.selectbox("From Location *", options=location_options, key="from_loc")
+        
+        # If Popup/Event selected, ask for custom name
+        if from_location_name == "📍 Popup/Event (Custom)":
+            from_custom_name = st.text_input("Event/Location Name *", placeholder="e.g., Health Fair at City Park", key="from_custom")
+        else:
+            from_custom_name = None
+    
+    with col2:
+        to_location_name = st.selectbox("To Location *", options=location_options, key="to_loc")
+        
+        if to_location_name == "📍 Popup/Event (Custom)":
+            to_custom_name = st.text_input("Event/Location Name *", placeholder="e.g., Community Center", key="to_custom")
+        else:
+            to_custom_name = None
+    
+    shipment_date = st.date_input("Shipment Date *", value=datetime.now())
+    notes = st.text_area("Notes", placeholder="Optional shipment notes or special instructions")
+    
+    # Validation
+    if from_location_name == to_location_name and from_custom_name == to_custom_name:
+        st.error("⚠️ Source and destination must be different")
+        if st.button("❌ Cancel"):
+            st.session_state.manifest_items = []
+            st.session_state.resource_view = 'manifests'
+            st.rerun()
+        return
+    
+    st.markdown("---")
+    st.markdown("### 📦 Add Items to Manifest")
+    
+    # Get source location ID
+    from_location_id = location_map[from_location_name]
+    
+    # Only show inventory if source is a real location (not Popup/Event)
+    if from_location_id != -1:
+        inventory_df = get_inventory_by_location(from_location_id)
+        
+        if inventory_df is not None and not inventory_df.empty:
+            available_items_df = inventory_df[inventory_df['quantity_available'] > 0]
+            
+            if not available_items_df.empty:
+                col1, col2, col3 = st.columns([3, 2, 2])
+                
+                with col1:
+                    resource_name = st.selectbox(
+                        "Select Resource",
+                        options=available_items_df['resource_name'].tolist(),
+                        key="manifest_resource"
+                    )
+                
+                selected_row = available_items_df[available_items_df['resource_name'] == resource_name].iloc[0]
+                available_qty = int(selected_row['quantity_available'])
+                
+                with col2:
+                    st.metric("Available Stock", f"{available_qty} {selected_row['unit_of_measure']}")
+                
+                with col3:
+                    quantity = st.number_input(
+                        "Quantity *", 
+                        min_value=1, 
+                        max_value=available_qty, 
+                        value=1,
+                        key="manifest_qty"
+                    )
+                
+                if st.button("➕ Add to Manifest", type="primary"):
+                    st.session_state.manifest_items.append({
+                        'resource_id': int(selected_row['resource_id']),
+                        'resource_name': resource_name,
+                        'quantity': quantity,
+                        'unit': selected_row['unit_of_measure']
+                    })
+                    st.success(f"✅ Added {quantity} {selected_row['unit_of_measure']} of {resource_name}")
+                    st.rerun()
+            else:
+                st.warning("⚠️ No inventory available at source location with stock > 0")
+        else:
+            st.info("ℹ️ No inventory found at source location")
+    else:
+        st.info("ℹ️ Source is Popup/Event - inventory will be manually tracked")
+    
+    # Display current manifest items
+    if st.session_state.manifest_items:
+        st.markdown("---")
+        st.markdown("### 📋 Current Manifest Items")
+        
+        items_df = pd.DataFrame(st.session_state.manifest_items)
+        st.dataframe(
+            items_df[['resource_name', 'quantity', 'unit']],
+            column_config={
+                "resource_name": "Resource",
+                "quantity": "Quantity",
+                "unit": "Unit"
+            },
+            hide_index=True,
+            use_container_width=True
+        )
+        
+        st.markdown("---")
+        
+        col1, col2, col3 = st.columns([2, 2, 2])
+        
+        with col1:
+            if st.button("✅ Create Manifest", type="primary", use_container_width=True):
+                username = st.session_state.get('username', 'Unknown')
+                
+                # Generate manifest number
+                manifest_num = f"MAN-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+                
+                # Prepare location values
+                from_loc_id = location_map[from_location_name] if from_location_id != -1 else None
+                to_loc_id = location_map[to_location_name] if location_map[to_location_name] != -1 else None
+                from_name = from_custom_name if from_location_id == -1 else None
+                to_name = to_custom_name if location_map[to_location_name] == -1 else None
+                
+                # Insert manifest
+                manifest_query = """
+                    INSERT INTO dbo.resource_manifests 
+                    (manifest_number, from_location_id, to_location_id, from_location_name, to_location_name,
+                     shipment_date, status, notes, created_by, created_at)
+                    OUTPUT INSERTED.manifest_id
+                    VALUES (?, ?, ?, ?, ?, ?, 'Staged', ?, ?, GETDATE())
+                """
+                
+                result_df, err = execute_query(
+                    manifest_query,
+                    (manifest_num, from_loc_id, to_loc_id, from_name, to_name, shipment_date, notes, username)
+                )
+                
+                if err:
+                    st.error(f"❌ Error creating manifest: {err}")
+                else:
+                    manifest_id = result_df.iloc[0]['manifest_id']
+                    
+                    # Insert manifest items
+                    for item in st.session_state.manifest_items:
+                        item_query = """
+                            INSERT INTO dbo.manifest_items (manifest_id, resource_id, quantity)
+                            VALUES (?, ?, ?)
+                        """
+                        execute_non_query(item_query, (manifest_id, item['resource_id'], item['quantity']))
+                    
+                    # Log activity
+                    from_display = from_custom_name if from_custom_name else from_location_name
+                    to_display = to_custom_name if to_custom_name else to_location_name
+                    log_manifest_activity(
+                        manifest_id, 
+                        "Created", 
+                        f"Manifest {manifest_num} created: {from_display} → {to_display}",
+                        username
+                    )
+                    
+                    st.success(f"✅ Manifest {manifest_num} created successfully!")
+                    st.balloons()
+                    st.session_state.manifest_items = []
+                    import time
+                    time.sleep(2)
+                    st.session_state.resource_view = 'manifests'
+                    st.rerun()
+        
+        with col2:
+            if st.button("🗑️ Clear All Items", use_container_width=True):
+                st.session_state.manifest_items = []
+                st.rerun()
+        
+        with col3:
+            if st.button("❌ Cancel", use_container_width=True):
+                st.session_state.manifest_items = []
+                st.session_state.resource_view = 'manifests'
+                st.rerun()
+    else:
+        col1, col2 = st.columns([1, 1])
+        with col2:
+            if st.button("❌ Cancel", use_container_width=True):
+                st.session_state.resource_view = 'manifests'
+                st.rerun()
+
+
 def render_resource_dashboard():
     """Dashboard with key metrics"""
     st.subheader("📊 Resource Management Dashboard")
@@ -1657,271 +2259,6 @@ def render_adjust_stock_form(selected_location_id):
                         st.session_state.show_adjust_form = False
                         st.rerun()
 
-def render_location_management():
-    """View and manage resource locations"""
-    st.subheader("📍 Location Management")
-    
-    locations_df = get_resource_locations()
-    
-    if locations_df.empty:
-        st.warning("No locations configured")
-    else:
-        st.markdown("### Active Locations")
-        st.dataframe(
-            locations_df[['location_name', 'location_type']],
-            use_container_width=True,
-            hide_index=True
-        )
-    
-    st.markdown("---")
-    st.markdown("### Add New Location")
-    
-    with st.form("add_location_form"):
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            location_name = st.text_input("Location Name *", placeholder="e.g., Crater Health District")
-        
-        with col2:
-            location_type = st.selectbox("Location Type *", ['Health District', 'Warehouse', 'Satellite Office', 'Other'])
-        
-        col1, col2 = st.columns(2)
-        with col1:
-            submit = st.form_submit_button("💾 Add Location", type="primary", use_container_width=True)
-        with col2:
-            cancel = st.form_submit_button("❌ Cancel", use_container_width=True)
-        
-        if cancel:
-            st.session_state.resource_view = 'dashboard'
-            st.rerun()
-        
-        if submit:
-            if not location_name:
-                st.error("⚠️ Please enter a location name")
-            else:
-                username = st.session_state.get('username', 'Unknown')
-                
-                insert_query = """
-                    INSERT INTO dbo.resource_locations (location_name, location_type, is_active, created_by, created_at)
-                    VALUES (?, ?, 1, ?, GETDATE())
-                """
-                
-                result, err = execute_non_query(insert_query, (location_name, location_type, username))
-                
-                if err:
-                    st.error(f"❌ Error adding location: {err}")
-                else:
-                    st.success(f"✅ Location '{location_name}' added successfully!")
-                    import time
-                    time.sleep(1)
-                    st.rerun()
-
-def render_manifest_creation():
-    """Create a new resource manifest/shipment"""
-    st.subheader("📦 Create New Manifest")
-    
-    locations_df = get_resource_locations()
-    if locations_df.empty:
-        st.error("No locations available. Please add locations first.")
-        return
-    
-    # Initialize session state for manifest
-    if 'manifest_items' not in st.session_state:
-        st.session_state.manifest_items = []
-    if 'manifest_from' not in st.session_state:
-        st.session_state.manifest_from = None
-    if 'manifest_to' not in st.session_state:
-        st.session_state.manifest_to = None
-    if 'manifest_notes' not in st.session_state:
-        st.session_state.manifest_notes = ""
-    if 'manifest_date' not in st.session_state:
-        import datetime
-        st.session_state.manifest_date = datetime.date.today()
-    
-    # Step 1: Shipment Header (not in a form initially)
-    st.markdown("### Shipment Details")
-    
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        from_location = st.selectbox(
-            "From Location *",
-            options=locations_df['location_id'].tolist(),
-            format_func=lambda x: locations_df[locations_df['location_id']==x]['location_name'].values[0],
-            key="manifest_from_selector"
-        )
-        st.session_state.manifest_from = from_location
-    
-    with col2:
-        to_location = st.selectbox(
-            "To Location *",
-            options=locations_df['location_id'].tolist(),
-            format_func=lambda x: locations_df[locations_df['location_id']==x]['location_name'].values[0],
-            key="manifest_to_selector"
-        )
-        st.session_state.manifest_to = to_location
-    
-    shipment_date = st.date_input("Shipment Date *", value=st.session_state.manifest_date, key="manifest_date_input")
-    st.session_state.manifest_date = shipment_date
-    
-    notes = st.text_area("Notes", value=st.session_state.manifest_notes, placeholder="Optional shipment notes", key="manifest_notes_input")
-    st.session_state.manifest_notes = notes
-    
-    if from_location == to_location:
-        st.error("⚠️ Source and destination locations must be different")
-        return
-    
-    st.markdown("---")
-    
-    # Step 2: Add Items
-    st.markdown("### Add Items to Manifest")
-    
-    inventory_df = get_inventory_by_location(from_location)
-    
-    if inventory_df.empty:
-        st.warning("No inventory available at source location")
-    else:
-        # Filter to only show items with available quantity > 0
-        available_items_df = inventory_df[inventory_df['quantity_available'] > 0]
-        
-        if available_items_df.empty:
-            st.warning("No inventory items with available stock at this location")
-            col1, col2 = st.columns([2, 1])
-            with col2:
-                if st.button("❌ Cancel", use_container_width=True):
-                    st.session_state.manifest_items = []
-                    st.session_state.manifest_notes = ""
-                    st.session_state.resource_view = 'dashboard'
-                    st.rerun()
-            return
-        
-        col1, col2, col3 = st.columns([3, 2, 2])
-        
-        with col1:
-            resource_name = st.selectbox(
-                "Select Resource",
-                options=available_items_df['resource_name'].tolist(),
-                key="manifest_resource_selector"
-            )
-        
-        selected_row = available_items_df[available_items_df['resource_name'] == resource_name].iloc[0]
-        available_qty = int(selected_row['quantity_available'])
-        
-        with col2:
-            st.metric("Available", f"{available_qty} {selected_row['unit_of_measure']}")
-        
-        with col3:
-            quantity = st.number_input("Quantity", min_value=1, max_value=available_qty, value=1, key="manifest_qty")
-        
-        if st.button("➕ Add to Manifest", type="primary", use_container_width=True):
-            st.session_state.manifest_items.append({
-                'resource_id': int(selected_row['resource_id']),
-                'resource_name': resource_name,
-                'quantity': quantity,
-                'unit': selected_row['unit_of_measure']
-            })
-            st.success(f"Added {quantity} {selected_row['unit_of_measure']} of {resource_name}")
-            st.rerun()
-    
-    # Step 3: Display current items and finalize
-    if st.session_state.manifest_items:
-        st.markdown("---")
-        st.markdown("### Current Manifest Items")
-        import pandas as pd
-        items_df = pd.DataFrame(st.session_state.manifest_items)
-        st.dataframe(items_df[['resource_name', 'quantity', 'unit']], use_container_width=True, hide_index=True)
-        
-        col1, col2, col3 = st.columns([2, 2, 1])
-        
-        with col1:
-            if st.button("✅ Create Manifest", type="primary", use_container_width=True):
-                # Create the manifest
-                username = st.session_state.get('username', 'Unknown')
-                
-                # Insert shipment header
-                shipment_query = """
-                    INSERT INTO dbo.resource_shipments 
-                    (from_location_id, to_location_id, shipment_date, status, notes, created_by, created_at)
-                    OUTPUT INSERTED.shipment_id
-                    VALUES (?, ?, ?, 'Pending', ?, ?, GETDATE())
-                """
-                
-                result_df, err = execute_query(shipment_query, (
-                    st.session_state.manifest_from,
-                    st.session_state.manifest_to,
-                    st.session_state.manifest_date,
-                    st.session_state.manifest_notes,
-                    username
-                ))
-                
-                if err:
-                    st.error(f"❌ Error creating manifest: {err}")
-                else:
-                    shipment_id = result_df.iloc[0]['shipment_id']
-                    
-                    # Insert shipment items
-                    for item in st.session_state.manifest_items:
-                        item_query = """
-                            INSERT INTO dbo.resource_shipment_items 
-                            (shipment_id, resource_id, quantity_shipped)
-                            VALUES (?, ?, ?)
-                        """
-                        execute_non_query(item_query, (shipment_id, item['resource_id'], item['quantity']))
-                    
-                    st.success(f"✅ Manifest created successfully! Shipment ID: {shipment_id}")
-                    
-                    # Clear session state
-                    st.session_state.manifest_items = []
-                    st.session_state.manifest_notes = ""
-                    import time
-                    time.sleep(2)
-                    st.session_state.resource_view = 'manifests'
-                    st.rerun()
-        
-        with col2:
-            if st.button("🗑️ Clear All Items", use_container_width=True):
-                st.session_state.manifest_items = []
-                st.rerun()
-        
-        with col3:
-            if st.button("❌ Cancel", use_container_width=True):
-                st.session_state.manifest_items = []
-                st.session_state.manifest_notes = ""
-                st.session_state.resource_view = 'dashboard'
-                st.rerun()
-    else:
-        col1, col2 = st.columns(2)
-        with col2:
-            if st.button("❌ Cancel", use_container_width=True):
-                st.session_state.manifest_items = []
-                st.session_state.manifest_notes = ""
-                st.session_state.resource_view = 'dashboard'
-                st.rerun()
-
-def render_manifest_list():
-    """View all manifests/shipments"""
-    st.subheader("📋 Manifests")
-    
-    query = """
-        SELECT s.shipment_id, s.shipment_date, 
-               fl.location_name as from_location, 
-               tl.location_name as to_location,
-               s.status, s.created_by, s.created_at
-        FROM dbo.resource_shipments s
-        INNER JOIN dbo.resource_locations fl ON s.from_location_id = fl.location_id
-        INNER JOIN dbo.resource_locations tl ON s.to_location_id = tl.location_id
-        ORDER BY s.created_at DESC
-    """
-    
-    df, err = execute_query(query)
-    
-    if err:
-        st.error(f"Error loading manifests: {err}")
-    elif df.empty:
-        st.info("No manifests found. Create your first manifest to get started.")
-    else:
-        st.dataframe(df, use_container_width=True, hide_index=True)
-
 def render_resource_management():
     """Main Resource Management page"""
     
@@ -1932,7 +2269,7 @@ def render_resource_management():
     st.markdown("*Population Health Distribution System*")
     st.markdown("---")
     
-    col1, col2, col3, col4, col5, col6 = st.columns(6)
+    col1, col2, col3, col4 = st.columns(4)
     
     with col1:
         if st.button("📊 Dashboard", use_container_width=True, 
@@ -1958,18 +2295,6 @@ def render_resource_management():
             st.session_state.resource_view = 'add_resource'
             st.rerun()
     
-    with col5:
-        if st.button("📦 New Manifest", use_container_width=True,
-                    type="primary" if st.session_state.resource_view == 'create_manifest' else "secondary"):
-            st.session_state.resource_view = 'create_manifest'
-            st.rerun()
-    
-    with col6:
-        if st.button("📍 Locations", use_container_width=True,
-                    type="primary" if st.session_state.resource_view == 'locations' else "secondary"):
-            st.session_state.resource_view = 'locations'
-            st.rerun()
-    
     st.markdown("---")
     
     if st.session_state.resource_view == 'dashboard':
@@ -1982,8 +2307,7 @@ def render_resource_management():
         render_manifest_list()
     elif st.session_state.resource_view == 'create_manifest':
         render_manifest_creation()
-    else:
-        render_location_management()
+    # Locations view removed
 
     # Define page options
 
