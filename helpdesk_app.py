@@ -2079,41 +2079,69 @@ def render_manifest_creation():
                     VALUES (?, ?, ?, ?, ?, ?, 'Staged', ?, ?, GETDATE())
                 """
                 
-                result_df, err = execute_query(
-                    manifest_query,
-                    (manifest_num, from_loc_id, to_loc_id, from_name, to_name, shipment_date, notes, username)
-                )
-                
-                if err:
-                    st.error(f"❌ Error creating manifest: {err}")
-                else:
-                    manifest_id = result_df.iloc[0]['manifest_id']
-                    
-                    # Insert manifest items
-                    for item in st.session_state.manifest_items:
-                        item_query = """
-                            INSERT INTO dbo.manifest_items (manifest_id, resource_id, quantity)
-                            VALUES (?, ?, ?)
-                        """
-                        execute_non_query(item_query, (manifest_id, item['resource_id'], item['quantity']))
-                    
-                    # Log activity
-                    from_display = from_custom_name if from_custom_name else from_location_name
-                    to_display = to_custom_name if to_custom_name else to_location_name
-                    log_manifest_activity(
-                        manifest_id, 
-                        "Created", 
-                        f"Manifest {manifest_num} created: {from_display} → {to_display}",
-                        username
+                try:
+                    result_df, err = execute_query(
+                        manifest_query,
+                        (manifest_num, from_loc_id, to_loc_id, from_name, to_name, shipment_date, notes, username)
                     )
                     
-                    st.success(f"✅ Manifest {manifest_num} created successfully!")
-                    st.balloons()
-                    st.session_state.manifest_items = []
-                    import time
-                    time.sleep(2)
-                    st.session_state.resource_view = 'manifests'
-                    st.rerun()
+                    if err:
+                        st.error(f"❌ Error creating manifest: {err}")
+                        _logger.error(f"Manifest creation SQL error: {err}")
+                    elif result_df is None or result_df.empty:
+                        st.error("❌ Manifest creation failed - no ID returned from database")
+                        st.warning("📋 Debug info: Query executed but returned no data")
+                        _logger.error(f"Manifest creation returned None/empty. Params: {(manifest_num, from_loc_id, to_loc_id, from_name, to_name, shipment_date, notes, username)}")
+                    else:
+                        manifest_id = result_df.iloc[0]['manifest_id']
+                        st.success(f"✅ Manifest header created with ID: {manifest_id}")
+                        
+                        # Insert manifest items
+                        items_success = 0
+                        for item in st.session_state.manifest_items:
+                            try:
+                                item_query = """
+                                    INSERT INTO dbo.manifest_items (manifest_id, resource_id, quantity)
+                                    VALUES (?, ?, ?)
+                                """
+                                item_result, item_err = execute_non_query(item_query, (manifest_id, item['resource_id'], item['quantity']))
+                                if not item_err:
+                                    items_success += 1
+                                else:
+                                    st.warning(f"⚠️ Error adding item {item['resource_name']}: {item_err}")
+                            except Exception as item_ex:
+                                st.warning(f"⚠️ Exception adding item {item['resource_name']}: {item_ex}")
+                        
+                        st.info(f"Added {items_success}/{len(st.session_state.manifest_items)} items to manifest")
+                        
+                        # Log activity
+                        try:
+                            from_display = from_custom_name if from_custom_name else from_location_name
+                            to_display = to_custom_name if to_custom_name else to_location_name
+                            log_manifest_activity(
+                                manifest_id, 
+                                "Created", 
+                                f"Manifest {manifest_num} created: {from_display} → {to_display}",
+                                username
+                            )
+                        except Exception as log_err:
+                            st.warning(f"⚠️ Activity logging failed: {log_err}")
+                            _logger.error(f"Activity log error: {log_err}")
+                        
+                        st.success(f"🎉 Manifest {manifest_num} created successfully!")
+                        st.balloons()
+                        st.session_state.manifest_items = []
+                        import time
+                        time.sleep(2)
+                        st.session_state.resource_view = 'manifests'
+                        st.rerun()
+                
+                except Exception as e:
+                    st.error(f"❌ Unexpected error creating manifest: {str(e)}")
+                    _logger.exception("Manifest creation exception")
+                    with st.expander("🐛 Debug Details"):
+                        import traceback
+                        st.code(traceback.format_exc())
         
         with col2:
             if st.button("🗑️ Clear All Items", use_container_width=True):
