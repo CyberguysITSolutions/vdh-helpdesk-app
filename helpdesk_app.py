@@ -431,7 +431,7 @@ def render_helpdesk_ticket_public_form():
     
     # Custom sidebar for public forms
     with st.sidebar:
-        st.title("🏥 VDH Service Center")
+        st.title("🏥 VDH Crater Service Center")
         st.markdown("---")
         st.markdown("### 🔗 Quick Links")
         st.markdown("[🔐 Login to Service Desk](http://localhost:8501)")
@@ -542,7 +542,7 @@ def render_request_vehicle_public_form():
     
     # Custom sidebar for public forms
     with st.sidebar:
-        st.title("🏥 VDH Service Center")
+        st.title("🏥 VDH Crater Service Center")
         st.markdown("---")
         st.markdown("### 🔗 Quick Links")
         st.markdown("[🔐 Login to Service Desk](http://localhost:8501)")
@@ -838,7 +838,7 @@ def render_procurement_request_public_form():
     
     # Custom sidebar for public forms
     with st.sidebar:
-        st.title("🏥 VDH Service Center")
+        st.title("🏥 VDH Crater Service Center")
         st.markdown("---")
         st.markdown("### 🔗 Quick Links")
         st.markdown("[🔐 Login to Service Desk](http://localhost:8501)")
@@ -908,7 +908,7 @@ def render_driver_trip_entry_public_form():
     
     # Custom sidebar for public forms
     with st.sidebar:
-        st.title("🏥 VDH Service Center")
+        st.title("🏥 VDH Crater Service Center")
         st.markdown("---")
         st.markdown("### 🔗 Quick Links")
         st.markdown("[🔐 Login to Service Desk](http://localhost:8501)")
@@ -1285,9 +1285,26 @@ def get_inventory_by_location(location_id):
 # =====================================================
 
 def render_login_page():
-    """Simple login page to wake up database"""
-    st.title("🏥 VDH Service Center")
-    st.markdown("### Welcome to the VDH Helpdesk System")
+    """Simple login page with centered header"""
+    
+    # CSS for centering
+    st.markdown("""
+        <style>
+        .main .block-container {
+            max-width: 700px;
+            padding-top: 3rem;
+        }
+        </style>
+    """, unsafe_allow_html=True)
+    
+    # Centered header
+    st.markdown("""
+        <div style="text-align: center; margin-bottom: 2rem;">
+            <h1>🏥 VDH Crater Service Center</h1>
+            <h3>Welcome to the VDH Helpdesk System</h3>
+        </div>
+    """, unsafe_allow_html=True)
+    
     st.markdown("---")
     
     # Try to connect to database to wake it up
@@ -1343,7 +1360,7 @@ def render_login_page():
                     st.session_state.show_password_reset = True
                     st.rerun()
             
-            st.caption("Having trouble logging in? Contact IT Help Desk")
+            st.markdown("<div style='text-align: center; margin-top: 1rem;'><small>Having trouble logging in? Contact IT Help Desk</small></div>", unsafe_allow_html=True)
         
         else:
             # Password reset form
@@ -2340,7 +2357,7 @@ def render_resource_management():
     # Define page options
 
 def main():
-    st.set_page_config(page_title="VDH Service Center", page_icon="🏥", layout="wide")
+    st.set_page_config(page_title="VDH Crater Service Center", page_icon="🏥", layout="wide")
 
     # Check authentication
     if "authenticated" not in st.session_state or not st.session_state.authenticated:
@@ -2418,13 +2435,13 @@ def main():
             svg = """
             <svg width="200" height="80" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="VDH">
               <rect width="200" height="80" fill="#002855" rx="6" ry="6"/>
-              <text x="100" y="50" font-family="Arial, Helvetica, sans-serif" font-size="16" fill="#FFFFFF" text-anchor="middle">VDH Service Center</text>
+              <text x="100" y="50" font-family="Arial, Helvetica, sans-serif" font-size="16" fill="#FFFFFF" text-anchor="middle">VDH Crater Service Center</text>
             </svg>
             """
             b64 = base64.b64encode(svg.encode("utf-8")).decode("utf-8")
             st.sidebar.markdown(f'<img src="data:image/svg+xml;base64,{b64}" width="200" alt="VDH logo">', unsafe_allow_html=True)
 
-    st.sidebar.title("VDH Service Center")
+    st.sidebar.title("VDH Crater Service Center")
 
     # User profile section
     username = st.session_state.get("username", "User")
@@ -3606,10 +3623,46 @@ def main():
         
         with tab1:
             st.subheader("📋 Vehicle Requests & Approvals")
-            # Pending Vehicle Requests Section (add to top of Fleet Management)
+            
+            username = st.session_state.get('username', 'Unknown')
+            
+            # === VEHICLE STATISTICS AT TOP ===
+            st.markdown("---")
+            st.markdown("### 🚗 Fleet Status Overview")
+            
+            # Get vehicle statistics
+            stats_query = """
+                SELECT 
+                    COUNT(*) as total_fleet,
+                    SUM(CASE WHEN status = 'Available' THEN 1 ELSE 0 END) as available,
+                    SUM(CASE WHEN status = 'Dispatched' THEN 1 ELSE 0 END) as dispatched,
+                    SUM(CASE WHEN status = 'Maintenance' THEN 1 ELSE 0 END) as in_maintenance
+                FROM dbo.vehicles
+            """
+            stats_df, _ = execute_query(stats_query)
+            
+            if stats_df is not None and not stats_df.empty:
+                col1, col2, col3, col4, col5 = st.columns([2, 2, 2, 2, 2])
+                
+                with col1:
+                    st.metric("Available", int(stats_df.iloc[0]['available']))
+                with col2:
+                    st.metric("Dispatched", int(stats_df.iloc[0]['dispatched']))
+                with col3:
+                    st.metric("In Maintenance", int(stats_df.iloc[0]['in_maintenance']))
+                with col4:
+                    st.metric("Total Fleet", int(stats_df.iloc[0]['total_fleet']))
+                with col5:
+                    # Add Vehicle button at top
+                    if st.button("➕ Add Vehicle", type="primary", use_container_width=True, key="add_vehicle_top"):
+                        st.session_state.add_vehicle_mode = True
+                        st.rerun()
+            
+            st.markdown("---")
+            
+            # Pending Vehicle Requests Section
             if DB_AVAILABLE:
-                st.markdown("---")
-                st.subheader("📋 Pending Vehicle Requests")
+                st.markdown("### 📋 Pending Vehicle Requests")
             
             pending_query = """
                 SELECT 
@@ -3669,9 +3722,9 @@ def main():
                         st.markdown("---")
                         
                         # Approval actions
-                        col1, col2, col3, col4 = st.columns([2, 1, 1, 2])
+                        col1, col2, col3, col4 = st.columns(4)
                         
-                        with col2:
+                        with col1:
                             approve_key = f"approve_vehicle_{request['request_id']}"
                             
                             # Check if we're in approval mode for this request
@@ -3732,7 +3785,7 @@ def main():
                                     st.session_state[f"approving_{request['request_id']}"] = True
                                     st.rerun()
                         
-                        with col3:
+                        with col2:
                             if st.button("❌ Reject", key=f"reject_vehicle_{request['request_id']}", use_container_width=True):
                                 with st.form(key=f"reject_form_{request['request_id']}"):
                                     admin_name = st.text_input("Your Name (Admin)")
@@ -3765,6 +3818,81 @@ def main():
                                                 st.error(f"Error: {error}")
                                         else:
                                             st.error("Please provide your name and rejection reason")
+                        
+                        with col3:
+                            # NEW: Cancel Request Button
+                            if st.button("🚫 Cancel Request", key=f"cancel_req_{request['request_id']}", use_container_width=True):
+                                st.session_state[f"show_cancel_{request['request_id']}"] = True
+                                st.rerun()
+                        
+                        # NEW: Cancel Request Modal
+                        if st.session_state.get(f"show_cancel_{request['request_id']}", False):
+                            st.markdown("---")
+                            st.warning("⚠️ Cancel Vehicle Request")
+                            st.info("This will permanently cancel this request and log the cancellation.")
+                            
+                            cancel_reason = st.text_area(
+                                "Cancellation Reason (Required) *",
+                                placeholder="Please provide a detailed reason for cancelling this request (minimum 10 characters)...",
+                                key=f"cancel_reason_{request['request_id']}",
+                                height=100
+                            )
+                            
+                            col_a, col_b = st.columns(2)
+                            
+                            with col_a:
+                                if st.button("✅ Confirm Cancellation", key=f"confirm_cancel_{request['request_id']}", type="primary"):
+                                    if not cancel_reason or len(cancel_reason.strip()) < 10:
+                                        st.error("❌ Cancellation reason must be at least 10 characters")
+                                    else:
+                                        # Log the cancellation
+                                        log_query = """
+                                            INSERT INTO dbo.cancelled_vehicle_requests (
+                                                request_id, vehicle_id, requester_name, requester_email,
+                                                requester_location, purpose, start_date, return_date,
+                                                estimated_miles, request_date, cancellation_reason,
+                                                cancelled_by, cancelled_at, original_status
+                                            )
+                                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, GETDATE(), ?)
+                                        """
+                                        
+                                        success_log, log_err = execute_non_query(
+                                            log_query,
+                                            (
+                                                request['request_id'],
+                                                request['vehicle_id'],
+                                                request['requester_name'],
+                                                request['requester_email'],
+                                                request['requester_location'],
+                                                request['purpose'],
+                                                request['start_date'],
+                                                request['end_date'],
+                                                request['estimated_miles'],
+                                                request['request_date'],
+                                                cancel_reason,
+                                                username,
+                                                'Pending'
+                                            )
+                                        )
+                                        
+                                        if success_log:
+                                            # Delete the request
+                                            delete_query = "DELETE FROM dbo.Vehicle_Requests WHERE request_id = ?"
+                                            success_del, del_err = execute_non_query(delete_query, (request['request_id'],))
+                                            
+                                            if success_del:
+                                                st.success(f"✅ Request #{request['request_id']} cancelled and logged")
+                                                del st.session_state[f"show_cancel_{request['request_id']}"]
+                                                st.rerun()
+                                            else:
+                                                st.error(f"Error deleting request: {del_err}")
+                                        else:
+                                            st.error(f"Error logging cancellation: {log_err}")
+                            
+                            with col_b:
+                                if st.button("← Back", key=f"cancel_back_{request['request_id']}"):
+                                    del st.session_state[f"show_cancel_{request['request_id']}"]
+                                    st.rerun()
                 
                 st.markdown("---")
                 st.subheader("📜 Approval History")
@@ -3805,7 +3933,8 @@ def main():
                 v.id, v.year, v.make_model, v.license_plate,
                 v.current_driver, v.last_used_date, v.current_mileage,
                 vr.requester_email, vr.requester_phone, vr.requester_location,
-                vr.end_date, vr.purpose, vr.estimated_miles, vr.start_date
+                vr.end_date, vr.purpose, vr.estimated_miles, vr.start_date,
+                vr.request_id
             FROM dbo.vehicles v
             LEFT JOIN dbo.Vehicle_Requests vr ON v.id = vr.vehicle_id 
                 AND vr.status = 'Approved'
@@ -3854,8 +3983,9 @@ def main():
                     
                     # Contact button
                     st.markdown("---")
-                    col1, col2, col3 = st.columns([2, 1, 2])
-                    with col2:
+                    col1, col2, col3 = st.columns([2, 2, 2])
+                    
+                    with col1:
                         if st.button("📞 Contact Driver", key=f"contact_driver_{vehicle['id']}", use_container_width=True):
                             if pd.notna(vehicle.get('requester_email')) or pd.notna(vehicle.get('requester_phone')):
                                 contact_info = []
@@ -3866,6 +3996,139 @@ def main():
                                 st.info("\n".join(contact_info))
                             else:
                                 st.warning("Contact information not available")
+                    
+                    with col2:
+                        # NEW: Close Trip Button (Admin Override)
+                        if st.button("🔒 Close Trip (Admin)", key=f"close_trip_{vehicle['id']}", type="primary", use_container_width=True):
+                            st.session_state[f"show_close_trip_{vehicle['id']}"] = True
+                            st.rerun()
+                    
+                    # NEW: Close Trip Form Modal
+                    if st.session_state.get(f"show_close_trip_{vehicle['id']}", False):
+                        st.markdown("---")
+                        st.warning("🔒 Admin Close Trip Form")
+                        st.info("Complete this form to close the trip on behalf of the driver")
+                        
+                        from datetime import date
+                        
+                        with st.form(key=f"close_trip_form_{vehicle['id']}"):
+                            col_a, col_b = st.columns(2)
+                            
+                            with col_a:
+                                trip_date = st.date_input("Trip Date *", value=date.today())
+                                
+                                start_mileage = st.number_input(
+                                    "Starting Mileage *",
+                                    min_value=0,
+                                    value=int(vehicle['current_mileage']) if pd.notna(vehicle.get('current_mileage')) else 0
+                                )
+                                
+                                end_mileage = st.number_input(
+                                    "Ending Mileage *",
+                                    min_value=start_mileage,
+                                    value=start_mileage + 50
+                                )
+                            
+                            with col_b:
+                                destination = st.text_input(
+                                    "Destination *",
+                                    value=vehicle.get('requester_location', '') if pd.notna(vehicle.get('requester_location')) else ''
+                                )
+                                
+                                purpose = st.text_area(
+                                    "Trip Purpose *",
+                                    value=vehicle.get('purpose', '') if pd.notna(vehicle.get('purpose')) else '',
+                                    height=100
+                                )
+                            
+                            admin_reason = st.text_input(
+                                "Admin Override Reason *",
+                                placeholder="Why are you closing this trip as admin? (e.g., Driver unable to complete form)"
+                            )
+                            
+                            notes = st.text_area(
+                                "Trip Notes (Optional)",
+                                placeholder="Any additional notes about the trip..."
+                            )
+                            
+                            col_x, col_y = st.columns(2)
+                            
+                            with col_x:
+                                submit_trip = st.form_submit_button("✅ Close Trip", type="primary", use_container_width=True)
+                            
+                            with col_y:
+                                cancel_trip = st.form_submit_button("← Cancel", use_container_width=True)
+                            
+                            if submit_trip:
+                                if not all([destination, purpose, admin_reason]):
+                                    st.error("❌ Please fill in all required fields")
+                                elif end_mileage < start_mileage:
+                                    st.error("❌ Ending mileage must be greater than or equal to starting mileage")
+                                else:
+                                    # Log trip
+                                    miles_driven = end_mileage - start_mileage
+                                    combined_notes = f"[ADMIN CLOSED: {admin_reason}]\n\n{notes}" if notes else f"[ADMIN CLOSED: {admin_reason}]"
+                                    
+                                    trip_query = """
+                                        INSERT INTO dbo.driver_trips (
+                                            vehicle_id, driver_name, trip_date, destination,
+                                            purpose, start_mileage, end_mileage, miles_driven,
+                                            notes, created_by, created_at
+                                        )
+                                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, GETDATE())
+                                    """
+                                    
+                                    success_trip, trip_err = execute_non_query(
+                                        trip_query,
+                                        (
+                                            vehicle['id'],
+                                            vehicle['current_driver'],
+                                            trip_date,
+                                            destination,
+                                            purpose,
+                                            start_mileage,
+                                            end_mileage,
+                                            miles_driven,
+                                            combined_notes,
+                                            username
+                                        )
+                                    )
+                                    
+                                    if success_trip:
+                                        # Update vehicle to Available
+                                        vehicle_update = """
+                                            UPDATE dbo.vehicles 
+                                            SET status = 'Available', 
+                                                current_driver = NULL,
+                                                current_mileage = ?,
+                                                updated_at = GETDATE()
+                                            WHERE id = ?
+                                        """
+                                        success_v, v_err = execute_non_query(vehicle_update, (end_mileage, vehicle['id']))
+                                        
+                                        # Mark request as completed if exists
+                                        if pd.notna(vehicle.get('request_id')):
+                                            request_update = """
+                                                UPDATE dbo.Vehicle_Requests 
+                                                SET status = 'Completed',
+                                                    updated_at = GETDATE()
+                                                WHERE request_id = ?
+                                            """
+                                            execute_non_query(request_update, (vehicle['request_id'],))
+                                        
+                                        if success_v:
+                                            st.success(f"✅ Trip closed! Miles driven: {miles_driven}")
+                                            st.balloons()
+                                            del st.session_state[f"show_close_trip_{vehicle['id']}"]
+                                            st.rerun()
+                                        else:
+                                            st.error(f"Error updating vehicle: {v_err}")
+                                    else:
+                                        st.error(f"Error logging trip: {trip_err}")
+                            
+                            if cancel_trip:
+                                del st.session_state[f"show_close_trip_{vehicle['id']}"]
+                                st.rerun()
 
         with tab3:
             st.subheader("🚗 Vehicle Management")
@@ -4925,7 +5188,7 @@ def main():
         render_resource_management()
 
     st.markdown("---")
-    st.markdown("*VDH Service Center - Comprehensive Management System | Virginia Department of Health © 2025*")
+    st.markdown("*VDH Crater Service Center - Comprehensive Management System | Virginia Department of Health © 2025*")
 
 # Run
 if __name__ == "__main__":
