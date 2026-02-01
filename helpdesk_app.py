@@ -2498,7 +2498,9 @@ def main():
 
     st.sidebar.markdown("---")
 
+    with st.sidebar:
         st.markdown("🏛️ **Public Access Forms**")
+
 
         ticket_href = "/?public=helpdesk_ticket"
         vehicle_href = "/?public=request_vehicle"
@@ -2506,34 +2508,34 @@ def main():
         driver_trip_href = "/?public=driver_trip_entry"
 
         html_links = (
-            '<div style="padding:6px 4px;">'
-            f'<a href="{ticket_href}" target="_blank" rel="noopener noreferrer" class="public-link">📩&nbsp;&nbsp;<strong>Submit a Ticket</strong></a><br/>'
-            f'<a href="{vehicle_href}" target="_blank" rel="noopener noreferrer" class="public-link">🚗&nbsp;&nbsp;<strong>Request a Vehicle</strong></a><br/>'
-            f'<a href="{proc_href}" target="_blank" rel="noopener noreferrer" class="public-link">🛒&nbsp;&nbsp;<strong>Submit a Requisition</strong></a><br/>'
-            f'<a href="{driver_trip_href}" target="_blank" rel="noopener noreferrer" class="public-link">🚙&nbsp;&nbsp;<strong>Driver Trip Entry</strong></a>'
-            '</div>'
-            '<style>'
-            '.public-link {'
-            '  display: block;'
-            '  width: calc(100% - 8px);'
-            '  box-sizing: border-box;'
-            '  background: #002855;'
-            '  color: #ffffff !important;'
-            '  padding: 10px 12px;'
-            '  text-decoration: none;'
-            '  border-radius: 6px;'
-            '  margin: 8px 4px;'
-            '  font-weight: 600;'
-            '  text-align: left;'
-            '  white-space: normal;'
-            '  line-height: 1.4;'
-            '}'
-            '.public-link:hover {'
-            '  background: #FF6B35;'
-            '  color:#fff !important;'
-            '  text-decoration: none;'
-            '}'
-            '</style>'
+        '<div style="padding:6px 4px;">'
+        f'<a href="{ticket_href}" target="_blank" rel="noopener noreferrer" class="public-link">📩&nbsp;&nbsp;<strong>Submit a Ticket</strong></a><br/>'
+        f'<a href="{vehicle_href}" target="_blank" rel="noopener noreferrer" class="public-link">🚗&nbsp;&nbsp;<strong>Request a Vehicle</strong></a><br/>'
+        f'<a href="{proc_href}" target="_blank" rel="noopener noreferrer" class="public-link">🛒&nbsp;&nbsp;<strong>Submit a Requisition</strong></a><br/>'
+        f'<a href="{driver_trip_href}" target="_blank" rel="noopener noreferrer" class="public-link">🚙&nbsp;&nbsp;<strong>Driver Trip Entry</strong></a>'
+        '</div>'
+        '<style>'
+        '.public-link {'
+        '  display: block;'
+        '  width: calc(100% - 8px);'
+        '  box-sizing: border-box;'
+        '  background: #002855;'
+        '  color: #ffffff !important;'
+        '  padding: 10px 12px;'
+        '  text-decoration: none;'
+        '  border-radius: 6px;'
+        '  margin: 8px 4px;'
+        '  font-weight: 600;'
+        '  text-align: left;'
+        '  white-space: normal;'
+        '  line-height: 1.4;'
+        '}'
+        '.public-link:hover {'
+        '  background: #FF6B35;'
+        '  color:#fff !important;'
+        '  text-decoration: none;'
+        '}'
+        '</style>'
         )
         st.markdown(html_links, unsafe_allow_html=True)
 
