@@ -1294,7 +1294,6 @@ def get_inventory_by_location(location_id):
 def render_login_page():
     """Simple login page to wake up database"""
     st.title("🏥 VDH Service Center")
-    st.markdown("### Welcome to the VDH Helpdesk System")
     st.markdown("---")
     
     # Try to connect to database to wake it up
@@ -2300,10 +2299,12 @@ def render_resource_management():
     if 'resource_view' not in st.session_state:
         st.session_state.resource_view = 'dashboard'
     
-    # Resource Management Locations (Petersburg facilities only)
+    st.title("📦 Resource Management")
+    
+    # Resource Management Locations
     RESOURCE_LOCATIONS = [
         "Petersburg WIC",
-        "Petersburg Clinic B",
+        "Petersburg Clinic B", 
         "Petersburg Warehouse",
         "Dinwiddie County Health Dept",
         "Greensville/Emporia Health Dept",
@@ -2312,8 +2313,7 @@ def render_resource_management():
         "Sussex County Health Dept",
         "Hopewell Health Dept",
     ]
-    
-    st.title("📦 Resource Management")
+
     st.markdown("*Population Health Distribution System*")
     st.markdown("---")
     
@@ -2480,27 +2480,7 @@ def main():
 
     with st.sidebar:
         st.markdown("---")
-
-    # Navigation (moved above Public Forms)
-    page = st.sidebar.selectbox(
-        "📍 Navigate to:",
-        page_options_display,
-        index=default_index,
-        label_visibility="visible",
-        key="page_selector"
-    )
-
-    page = page.split(" 🔴")[0]  # Strip badge from selection
-    
-    # Update session state when page changes
-    if page != st.session_state.current_page:
-        st.session_state.current_page = page
-
-    st.sidebar.markdown("---")
-
-    with st.sidebar:
         st.markdown("🏛️ **Public Access Forms**")
-
 
         ticket_href = "/?public=helpdesk_ticket"
         vehicle_href = "/?public=request_vehicle"
@@ -2508,34 +2488,34 @@ def main():
         driver_trip_href = "/?public=driver_trip_entry"
 
         html_links = (
-        '<div style="padding:6px 4px;">'
-        f'<a href="{ticket_href}" target="_blank" rel="noopener noreferrer" class="public-link">📩&nbsp;&nbsp;<strong>Submit a Ticket</strong></a><br/>'
-        f'<a href="{vehicle_href}" target="_blank" rel="noopener noreferrer" class="public-link">🚗&nbsp;&nbsp;<strong>Request a Vehicle</strong></a><br/>'
-        f'<a href="{proc_href}" target="_blank" rel="noopener noreferrer" class="public-link">🛒&nbsp;&nbsp;<strong>Submit a Requisition</strong></a><br/>'
-        f'<a href="{driver_trip_href}" target="_blank" rel="noopener noreferrer" class="public-link">🚙&nbsp;&nbsp;<strong>Driver Trip Entry</strong></a>'
-        '</div>'
-        '<style>'
-        '.public-link {'
-        '  display: block;'
-        '  width: calc(100% - 8px);'
-        '  box-sizing: border-box;'
-        '  background: #002855;'
-        '  color: #ffffff !important;'
-        '  padding: 10px 12px;'
-        '  text-decoration: none;'
-        '  border-radius: 6px;'
-        '  margin: 8px 4px;'
-        '  font-weight: 600;'
-        '  text-align: left;'
-        '  white-space: normal;'
-        '  line-height: 1.4;'
-        '}'
-        '.public-link:hover {'
-        '  background: #FF6B35;'
-        '  color:#fff !important;'
-        '  text-decoration: none;'
-        '}'
-        '</style>'
+            '<div style="padding:6px 4px;">'
+            f'<a href="{ticket_href}" target="_blank" rel="noopener noreferrer" class="public-link">📩&nbsp;&nbsp;<strong>Submit a Ticket</strong></a><br/>'
+            f'<a href="{vehicle_href}" target="_blank" rel="noopener noreferrer" class="public-link">🚗&nbsp;&nbsp;<strong>Request a Vehicle</strong></a><br/>'
+            f'<a href="{proc_href}" target="_blank" rel="noopener noreferrer" class="public-link">🛒&nbsp;&nbsp;<strong>Submit a Requisition</strong></a><br/>'
+            f'<a href="{driver_trip_href}" target="_blank" rel="noopener noreferrer" class="public-link">🚙&nbsp;&nbsp;<strong>Driver Trip Entry</strong></a>'
+            '</div>'
+            '<style>'
+            '.public-link {'
+            '  display: block;'
+            '  width: calc(100% - 8px);'
+            '  box-sizing: border-box;'
+            '  background: #002855;'
+            '  color: #ffffff !important;'
+            '  padding: 10px 12px;'
+            '  text-decoration: none;'
+            '  border-radius: 6px;'
+            '  margin: 8px 4px;'
+            '  font-weight: 600;'
+            '  text-align: left;'
+            '  white-space: normal;'
+            '  line-height: 1.4;'
+            '}'
+            '.public-link:hover {'
+            '  background: #FF6B35;'
+            '  color:#fff !important;'
+            '  text-decoration: none;'
+            '}'
+            '</style>'
         )
         st.markdown(html_links, unsafe_allow_html=True)
 
@@ -2602,6 +2582,19 @@ def main():
     except StopIteration:
         default_index = 0
     
+    page = st.sidebar.selectbox(
+        "Navigate",
+        page_options_display,
+        index=default_index,
+        label_visibility="collapsed",
+        key="page_selector"
+    )
+
+    page = page.split(" 🔴")[0]  # Strip badge from selection
+    
+    # Update session state when page changes
+    if page != st.session_state.current_page:
+        st.session_state.current_page = page
     
     if not DB_AVAILABLE and page != "📊 Dashboard":
         st.header(page)
@@ -2747,47 +2740,37 @@ def main():
         st.header("🎫 Helpdesk Tickets")
         
         # Create Ticket Button
+        if 'show_ticket_form' not in st.session_state:
+            st.session_state.show_ticket_form = False
+            
         if st.button("➕ Create New Ticket", type="primary", key="create_ticket_top"):
             st.session_state.show_ticket_form = True
         
-        if st.session_state.get("show_ticket_form", False):
+        if st.session_state.show_ticket_form:
             with st.form("quick_ticket_form"):
                 st.subheader("📝 Create New Ticket")
-                
                 col1, col2 = st.columns(2)
                 with col1:
-                    ticket_name = st.text_input("Your Name *", key="new_ticket_name")
-                    ticket_email = st.text_input("Email *", key="new_ticket_email")
+                    ticket_name = st.text_input("Your Name *")
+                    ticket_email = st.text_input("Email *")
                 with col2:
-                    ticket_location = st.selectbox("Location *", LOCATION_OPTIONS, key="new_ticket_location")
-                    ticket_category = st.selectbox("Category *", [
-                        "IT Support", "Facilities", "HR", "Finance", "Other"
-                    ], key="new_ticket_category")
-                
-                ticket_priority = st.selectbox("Priority *", ["Low", "Medium", "High", "Critical"], key="new_ticket_priority")
-                ticket_description = st.text_area("Description *", height=100, key="new_ticket_desc")
-                
+                    ticket_location = st.selectbox("Location *", LOCATION_OPTIONS)
+                    ticket_category = st.selectbox("Category *", ["IT Support", "Facilities", "HR", "Finance", "Other"])
+                ticket_priority = st.selectbox("Priority *", ["Low", "Medium", "High", "Critical"])
+                ticket_description = st.text_area("Description *", height=100)
                 col1, col2 = st.columns(2)
                 with col1:
-                    submitted = st.form_submit_button("✅ Submit Ticket", type="primary", use_container_width=True)
+                    submitted = st.form_submit_button("✅ Submit", type="primary", use_container_width=True)
                 with col2:
                     cancel = st.form_submit_button("❌ Cancel", use_container_width=True)
-                
                 if cancel:
                     st.session_state.show_ticket_form = False
                     st.rerun()
-                
-                if submitted:
-                    if ticket_name.strip() and ticket_email.strip() and ticket_description.strip():
-                        st.success("✅ Ticket created successfully!")
-                        st.info(f"📧 Confirmation sent to {ticket_email}")
-                        st.session_state.show_ticket_form = False
-                        st.rerun()
-                    else:
-                        st.error("❌ Please fill in all required fields (Name, Email, Description)")
-        
-        st.markdown("---")
-        
+                if submitted and ticket_name.strip() and ticket_email.strip() and ticket_description.strip():
+                    st.success("✅ Ticket created!")
+                    st.session_state.show_ticket_form = False
+                    st.rerun()
+
         
         # Initialize session states
         if 'view_ticket_id' not in st.session_state:
