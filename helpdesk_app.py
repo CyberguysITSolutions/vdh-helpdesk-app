@@ -2828,7 +2828,7 @@ def main():
                     with tab3:
                         st.write("### Ticket History")
                         journal_query = f"""
-                            SELECT note_id, note_text, note_type, created_by, created_at
+                            SELECT journal_id, entry_text, entry_type, created_by, created_at, is_internal
                             FROM dbo.ticket_journal
                             WHERE ticket_id = {st.session_state.view_ticket_id}
                             ORDER BY created_at DESC
@@ -2836,15 +2836,17 @@ def main():
                         journal_df, journal_error = execute_query(journal_query)
                         
                         if journal_error:
-                            st.info("No history available. (Ticket_Notes table may not exist yet)")
+                            st.error(f"Error loading history: {journal_error}")
                         elif journal_df is None or len(journal_df) == 0:
                             st.info("No history for this ticket yet.")
                         else:
                             for _, note in journal_df.iterrows():
+                                # Show internal tag if it's an internal note
+                                internal_badge = "🔒 Internal" if note.get('is_internal', 0) == 1 else ""
                                 st.markdown(f"""
                                 <div class="note-item">
-                                    <div class="note-header">{note['note_type']} • {note['created_by']} • {note['created_at']}</div>
-                                    <div class="note-text">{note['note_text']}</div>
+                                    <div class="note-header">{note['entry_type']} • {note['created_by']} • {note['created_at']} {internal_badge}</div>
+                                    <div class="note-text">{note['entry_text']}</div>
                                 </div>
                                 """, unsafe_allow_html=True)
                         
