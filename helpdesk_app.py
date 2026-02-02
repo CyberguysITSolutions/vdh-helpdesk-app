@@ -2747,7 +2747,18 @@ def main():
                         st.session_state.view_ticket_id = None
                         st.rerun()
                 
-                detail_query = f"SELECT * FROM dbo.Tickets WHERE ticket_id = {st.session_state.view_ticket_id}"
+                detail_query = f"""
+                    SELECT 
+                        ticket_id, status, priority, location, 
+                        subject, short_description, description,
+                        customer_name, customer_email, customer_phone,
+                        requester_name, requester_email, requester_phone,
+                        name, email, phone_number,
+                        department, assigned_to,
+                        created_at, first_response_at, resolved_at
+                    FROM dbo.Tickets 
+                    WHERE ticket_id = {st.session_state.view_ticket_id}
+                """
                 ticket_df, detail_err = execute_query(detail_query)
                 
                 if detail_err or ticket_df is None or len(ticket_df) == 0:
@@ -2759,7 +2770,7 @@ def main():
                     # Header
                     col1, col2, col3 = st.columns([2, 1, 1])
                     with col1:
-                        subject = ticket.get('subject', 'None')
+                        subject = ticket.get('subject') or ticket.get('short_description') or 'No Subject'
                         st.subheader(f"Ticket #{st.session_state.view_ticket_id}: {subject}")
                     with col2:
                         status = ticket.get('status', 'N/A')
@@ -2799,9 +2810,12 @@ def main():
                         col1, col2 = st.columns(2)
                         with col1:
                             st.write("### Contact Information")
-                            st.write(f"**Name:** {ticket.get('customer_name', 'N/A')}")
-                            st.write(f"**Email:** {ticket.get('customer_email', 'N/A')}")
-                            st.write(f"**Phone:** {ticket.get('customer_phone', 'N/A')}")
+                            customer_name = ticket.get('customer_name') or ticket.get('requester_name') or ticket.get('name') or 'N/A'
+                            customer_email = ticket.get('customer_email') or ticket.get('requester_email') or ticket.get('email') or 'N/A'  
+                            customer_phone = ticket.get('customer_phone') or ticket.get('requester_phone') or ticket.get('phone_number') or 'N/A'
+                            st.write(f"**Name:** {customer_name}")
+                            st.write(f"**Email:** {customer_email}")
+                            st.write(f"**Phone:** {customer_phone}")
                         
                         with col2:
                             st.write("### Location")
@@ -2876,24 +2890,28 @@ def main():
                 
                 st.markdown("### ✏️ Edit Ticket")
                 
+                # Debug info
+                st.info(f"🔍 Debug: Attempting to load ticket ID: {st.session_state.edit_ticket_id}")
+                
                 # Load current ticket data
                 edit_query = f"""
                     SELECT 
                         ticket_id, status, priority, location,
-                        COALESCE(subject, short_description, '') as subject,
-                        COALESCE(description, '') as description,
-                        COALESCE(assigned_to, '') as assigned_to,
-                        COALESCE(requester_name, customer_name, name, '') as customer_name,
-                        COALESCE(requester_email, customer_email, email, '') as customer_email,
-                        COALESCE(requester_phone, customer_phone, phone_number, phone, '') as customer_phone,
-                        COALESCE(department, '') as department
+                        subject, short_description, description,
+                        assigned_to,
+                        customer_name, customer_email, customer_phone,
+                        requester_name, requester_email, requester_phone,
+                        name, email, phone_number,
+                        department
                     FROM dbo.Tickets 
                     WHERE ticket_id = {st.session_state.edit_ticket_id}
                 """
                 ticket_df, edit_err = execute_query(edit_query)
                 
                 if edit_err or ticket_df is None or len(ticket_df) == 0:
-                    st.error("Ticket not found")
+                    st.error(f"❌ Ticket not found! Error: {edit_err if edit_err else 'No results'}")
+                    st.error(f"Ticket ID attempted: {st.session_state.edit_ticket_id}")
+                    st.error(f"Query: {edit_query}")
                     st.session_state.edit_ticket_id = None
                 else:
                     ticket = ticket_df.iloc[0]
@@ -2905,7 +2923,8 @@ def main():
                         
                         with col1:
                             st.write("### Ticket Details")
-                            subject = st.text_input("Subject", value=ticket.get('subject', ''))
+                            subject_val = ticket.get('subject') or ticket.get('short_description') or ''
+                            subject = st.text_input("Subject", value=subject_val)
                             status_options = ["New", "In Progress", "Pending", "Resolved", "Closed"]
                             current_status = ticket.get('status', 'New')
                             status_index = status_options.index(current_status) if current_status in status_options else 0
@@ -2916,15 +2935,18 @@ def main():
                             priority_index = priority_options.index(current_priority) if current_priority in priority_options else 1
                             priority = st.selectbox("Priority", priority_options, index=priority_index)
                             
-                            location = st.text_input("Location", value=ticket.get('location', ''))
-                            assigned_to = st.text_input("Assigned To", value=ticket.get('assigned_to', ''))
+                            location = st.text_input("Location", value=ticket.get('location') or '')
+                            assigned_to = st.text_input("Assigned To", value=ticket.get('assigned_to') or '')
                         
                         with col2:
                             st.write("### Customer Information")
-                            customer_name = st.text_input("Customer Name", value=ticket.get('customer_name', ''))
-                            customer_email = st.text_input("Email", value=ticket.get('customer_email', ''))
-                            customer_phone = st.text_input("Phone", value=ticket.get('customer_phone', ''))
-                            department = st.text_input("Department", value=ticket.get('department', ''))
+                            cust_name = ticket.get('customer_name') or ticket.get('requester_name') or ticket.get('name') or ''
+                            cust_email = ticket.get('customer_email') or ticket.get('requester_email') or ticket.get('email') or ''
+                            cust_phone = ticket.get('customer_phone') or ticket.get('requester_phone') or ticket.get('phone_number') or ''
+                            customer_name = st.text_input("Customer Name", value=cust_name)
+                            customer_email = st.text_input("Email", value=cust_email)
+                            customer_phone = st.text_input("Phone", value=cust_phone)
+                            department = st.text_input("Department", value=ticket.get('department') or '')
                         
                         description = st.text_area("Description", value=ticket.get('description', ''), height=150)
                         
