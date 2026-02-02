@@ -2920,6 +2920,9 @@ def main():
                 else:
                     ticket = ticket_df.iloc[0]
                     
+                    # DEBUG: Show current ticket status
+                    st.warning(f"🔍 **DEBUG:** Current ticket status in database: `{repr(ticket.get('status'))}`")
+                    
                     st.info(f"📝 Editing Ticket #{st.session_state.edit_ticket_id}")
                     
                     with st.form("edit_ticket_form"):
@@ -2943,8 +2946,34 @@ def main():
                                 "closed": "Closed"
                             }
                             
-                            current_status = ticket.get('status', 'New')
-                            status_index = status_options.index(current_status) if current_status in status_options else 0
+                            # Get current status and normalize it
+                            current_status_raw = ticket.get('status', 'New')
+                            
+                            # Case-insensitive mapping of current status to our options
+                            status_mapping = {
+                                'new': 'New',
+                                'open': 'open',
+                                'in progress': 'in_progress',
+                                'in_progress': 'in_progress',
+                                'on hold': 'on_hold',
+                                'on_hold': 'on_hold',
+                                'waiting customer response': 'waiting_customer_response',
+                                'waiting_customer_response': 'waiting_customer_response',
+                                'resolved': 'resolved',
+                                'closed': 'closed'
+                            }
+                            
+                            # Normalize current status (case-insensitive lookup)
+                            current_status_normalized = status_mapping.get(
+                                current_status_raw.lower().strip() if current_status_raw else 'new',
+                                'New'  # Default to New if not found
+                            )
+                            
+                            # Find index
+                            try:
+                                status_index = status_options.index(current_status_normalized)
+                            except ValueError:
+                                status_index = 0  # Default to first option
                             
                             # Show friendly names but save database values
                             status_choice = st.selectbox(
@@ -2992,6 +3021,12 @@ def main():
                             st.rerun()
                         
                         if save_button:
+                            # DEBUG: Show what we're trying to save
+                            st.write("🔍 **DEBUG INFO:**")
+                            st.write(f"- Status being saved: `{status}`")
+                            st.write(f"- Status type: {type(status)}")
+                            st.write(f"- Status repr: {repr(status)}")
+                            
                             # Update ticket in database
                             update_query = """
                                 UPDATE dbo.Tickets SET
