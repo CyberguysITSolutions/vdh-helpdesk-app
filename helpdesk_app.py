@@ -2929,10 +2929,31 @@ def main():
                             st.write("### Ticket Details")
                             subject_val = ticket.get('subject') or ticket.get('short_description') or ''
                             subject = st.text_input("Subject", value=subject_val)
-                            status_options = ["New", "In Progress", "Pending", "Resolved", "Closed"]
+                            
+                            # Status options that match database constraint
+                            status_options = ["New", "open", "in_progress", "on_hold", 
+                                            "waiting_customer_response", "resolved", "closed"]
+                            status_display = {
+                                "New": "New",
+                                "open": "Open", 
+                                "in_progress": "In Progress",
+                                "on_hold": "On Hold",
+                                "waiting_customer_response": "Waiting Customer Response",
+                                "resolved": "Resolved",
+                                "closed": "Closed"
+                            }
+                            
                             current_status = ticket.get('status', 'New')
                             status_index = status_options.index(current_status) if current_status in status_options else 0
-                            status = st.selectbox("Status", status_options, index=status_index)
+                            
+                            # Show friendly names but save database values
+                            status_choice = st.selectbox(
+                                "Status", 
+                                options=status_options,
+                                format_func=lambda x: status_display.get(x, x),
+                                index=status_index
+                            )
+                            status = status_choice  # This will be the database value
                             
                             priority_options = ["Low", "Medium", "High", "Critical"]
                             current_priority = ticket.get('priority', 'Medium')
@@ -3036,10 +3057,10 @@ def main():
                     # Statistics
                     col1, col2, col3, col4 = st.columns(4)
                     with col1:
-                        open_tickets = len(df[df['status'].isin(['New', 'Open', 'In Progress'])])
+                        open_tickets = len(df[df['status'].isin(['New', 'open', 'in_progress'])])
                         st.metric("Open", open_tickets)
                     with col2:
-                        resolved = len(df[df['status'] == 'Resolved'])
+                        resolved = len(df[df['status'] == 'resolved'])
                         st.metric("Resolved", resolved)
                     with col3:
                         high_priority = len(df[df['priority'].isin(['High', 'Critical'])])
@@ -3055,11 +3076,27 @@ def main():
                     with col1:
                         search = st.text_input("🔍 Search by Subject, Customer, or Location", "")
                     with col2:
-                        status_filter = st.multiselect(
+                        # Status display mapping
+                        status_display_options = {
+                            'New': 'New',
+                            'open': 'Open', 
+                            'in_progress': 'In Progress',
+                            'on_hold': 'On Hold',
+                            'waiting_customer_response': 'Waiting Customer Response',
+                            'resolved': 'Resolved',
+                            'closed': 'Closed'
+                        }
+                        # Reverse mapping for filtering
+                        display_to_db = {v: k for k, v in status_display_options.items()}
+                        
+                        # Show friendly names in UI
+                        status_display_filter = st.multiselect(
                             "Filter by Status",
-                            options=['New', 'Open', 'In Progress', 'On Hold', 'Resolved', 'Closed'],
+                            options=['New', 'Open', 'In Progress', 'On Hold', 'Waiting Customer Response', 'Resolved', 'Closed'],
                             default=['New', 'Open', 'In Progress']
                         )
+                        # Convert back to database values for filtering
+                        status_filter = [display_to_db.get(s, s) for s in status_display_filter]
                     
                     filtered_df = df.copy()
                     if search:
