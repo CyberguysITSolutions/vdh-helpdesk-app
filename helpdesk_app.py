@@ -524,14 +524,7 @@ def render_helpdesk_ticket_public_form():
             st.write("4. 🔧 We'll work to resolve your issue as quickly as possible")
             
             st.markdown("---")
-            
-            # Safe secrets access with fallback
-            try:
-                support_email = st.secrets.get('support_email', 'support@vdh.virginia.gov')
-            except Exception:
-                support_email = 'support@vdh.virginia.gov'
-            
-            st.caption(f"Need immediate assistance? Contact support at {support_email}")
+            st.caption(f"Need immediate assistance? Contact support at {st.secrets.get('support_email', 'support@vdh.virginia.gov')}")
             
             st.stop()  # Prevent redirect to main app
         except Exception as e:
@@ -1294,6 +1287,7 @@ def get_inventory_by_location(location_id):
 def render_login_page():
     """Simple login page to wake up database"""
     st.title("🏥 VDH Service Center")
+    st.markdown("### Welcome to the VDH Helpdesk System")
     st.markdown("---")
     
     # Try to connect to database to wake it up
@@ -2300,20 +2294,6 @@ def render_resource_management():
         st.session_state.resource_view = 'dashboard'
     
     st.title("📦 Resource Management")
-    
-    # Resource Management Locations
-    RESOURCE_LOCATIONS = [
-        "Petersburg WIC",
-        "Petersburg Clinic B", 
-        "Petersburg Warehouse",
-        "Dinwiddie County Health Dept",
-        "Greensville/Emporia Health Dept",
-        "Surry County Health Dept",
-        "Prince George Health Dept",
-        "Sussex County Health Dept",
-        "Hopewell Health Dept",
-    ]
-
     st.markdown("*Population Health Distribution System*")
     st.markdown("---")
     
@@ -2738,39 +2718,6 @@ def main():
     # CONNECTED MODE: Helpdesk Tickets - attempt to list tickets when DB_AVAILABLE is True
     elif page == "🎫 Helpdesk Tickets":
         st.header("🎫 Helpdesk Tickets")
-        
-        # Create Ticket Button
-        if 'show_ticket_form' not in st.session_state:
-            st.session_state.show_ticket_form = False
-            
-        if st.button("➕ Create New Ticket", type="primary", key="create_ticket_top"):
-            st.session_state.show_ticket_form = True
-        
-        if st.session_state.show_ticket_form:
-            with st.form("quick_ticket_form"):
-                st.subheader("📝 Create New Ticket")
-                col1, col2 = st.columns(2)
-                with col1:
-                    ticket_name = st.text_input("Your Name *")
-                    ticket_email = st.text_input("Email *")
-                with col2:
-                    ticket_location = st.selectbox("Location *", LOCATION_OPTIONS)
-                    ticket_category = st.selectbox("Category *", ["IT Support", "Facilities", "HR", "Finance", "Other"])
-                ticket_priority = st.selectbox("Priority *", ["Low", "Medium", "High", "Critical"])
-                ticket_description = st.text_area("Description *", height=100)
-                col1, col2 = st.columns(2)
-                with col1:
-                    submitted = st.form_submit_button("✅ Submit", type="primary", use_container_width=True)
-                with col2:
-                    cancel = st.form_submit_button("❌ Cancel", use_container_width=True)
-                if cancel:
-                    st.session_state.show_ticket_form = False
-                    st.rerun()
-                if submitted and ticket_name.strip() and ticket_email.strip() and ticket_description.strip():
-                    st.success("✅ Ticket created!")
-                    st.session_state.show_ticket_form = False
-                    st.rerun()
-
         
         # Initialize session states
         if 'view_ticket_id' not in st.session_state:
