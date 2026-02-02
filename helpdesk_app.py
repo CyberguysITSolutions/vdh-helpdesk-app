@@ -524,7 +524,11 @@ def render_helpdesk_ticket_public_form():
             st.write("4. 🔧 We'll work to resolve your issue as quickly as possible")
             
             st.markdown("---")
-            st.caption(f"Need immediate assistance? Contact support at {st.secrets.get('support_email', 'support@vdh.virginia.gov')}")
+            try:
+                support_email = st.secrets.get('support_email', 'support@vdh.virginia.gov')
+            except:
+                support_email = 'support@vdh.virginia.gov'
+            st.caption(f"Need immediate assistance? Contact support at {support_email}")
             
             st.stop()  # Prevent redirect to main app
         except Exception as e:
@@ -2975,13 +2979,19 @@ def main():
                                     priority = ?,
                                     location = ?,
                                     assigned_to = ?,
-                                    description = ?
+                                    description = ?,
+                                    customer_name = ?,
+                                    customer_email = ?,
+                                    customer_phone = ?,
+                                    department = ?,
+                                    updated_at = GETDATE()
                                 WHERE ticket_id = ?
                             """
                             
                             success, error = execute_non_query(
                                 update_query,
-                                (subject, status, priority, location, assigned_to, description, 
+                                (subject, status, priority, location, assigned_to, description,
+                                 customer_name, customer_email, customer_phone, department,
                                  st.session_state.edit_ticket_id)
                             )
                             
@@ -3008,8 +3018,11 @@ def main():
             else:
                 query = """
                     SELECT TOP 200 
-                        ticket_id, status, priority, name, email, location, 
-                        phone_number, short_description, created_at
+                        ticket_id, status, priority, location, created_at,
+                        subject, short_description,
+                        customer_name, requester_name, name,
+                        customer_email, requester_email, email,
+                        customer_phone, requester_phone, phone_number
                     FROM dbo.Tickets 
                     ORDER BY created_at DESC
                 """
@@ -3050,11 +3063,21 @@ def main():
                     
                     filtered_df = df.copy()
                     if search:
-                        filtered_df = filtered_df[
-                            filtered_df['short_description'].str.contains(search, case=False, na=False) |
-                            filtered_df['name'].str.contains(search, case=False, na=False) |
-                            filtered_df['location'].str.contains(search, case=False, na=False)
-                        ]
+                        # Check subject columns
+                        subject_match = (
+                            filtered_df['subject'].str.contains(search, case=False, na=False) |
+                            filtered_df['short_description'].str.contains(search, case=False, na=False)
+                        )
+                        # Check customer name columns
+                        customer_match = (
+                            filtered_df['customer_name'].str.contains(search, case=False, na=False) |
+                            filtered_df['requester_name'].str.contains(search, case=False, na=False) |
+                            filtered_df['name'].str.contains(search, case=False, na=False)
+                        )
+                        # Check location
+                        location_match = filtered_df['location'].str.contains(search, case=False, na=False)
+                        
+                        filtered_df = filtered_df[subject_match | customer_match | location_match]
                     if status_filter:
                         filtered_df = filtered_df[filtered_df['status'].isin(status_filter)]
                     
@@ -3073,7 +3096,8 @@ def main():
                             
                             with col1:
                                 ticket_id = ticket.get('ticket_id', 'N/A')
-                                subject = ticket.get('subject', 'None')
+                                # Check all subject options
+                                subject = ticket.get('subject') or ticket.get('short_description') or 'No Subject'
                                 status = ticket.get('status', 'N/A')
                                 
                                 # Bold new tickets for easy identification
@@ -3084,8 +3108,9 @@ def main():
                                     st.markdown(f'<div class="list-header">Ticket #{ticket_id}</div>', unsafe_allow_html=True)
                                     st.write(subject)
                                 
-                                customer = ticket.get('name', 'N/A')
-                                location = ticket.get('location', 'N/A')
+                                # Check all customer name options
+                                customer = ticket.get('customer_name') or ticket.get('requester_name') or ticket.get('name') or 'Unknown'
+                                location = ticket.get('location') or 'N/A'
                                 st.caption(f"👤 {customer} • 📍 {location}")
                             
                             with col2:
