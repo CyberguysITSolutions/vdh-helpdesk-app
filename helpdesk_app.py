@@ -2759,7 +2759,7 @@ def main():
                     # Header
                     col1, col2, col3 = st.columns([2, 1, 1])
                     with col1:
-                        subject = ticket.get('short_description', 'N/A')
+                        subject = ticket.get('subject', 'None')
                         st.subheader(f"Ticket #{st.session_state.view_ticket_id}: {subject}")
                     with col2:
                         status = ticket.get('status', 'N/A')
@@ -2799,9 +2799,9 @@ def main():
                         col1, col2 = st.columns(2)
                         with col1:
                             st.write("### Contact Information")
-                            st.write(f"**Name:** {ticket.get('name', 'N/A')}")
-                            st.write(f"**Email:** {ticket.get('email', 'N/A')}")
-                            st.write(f"**Phone:** {ticket.get('phone_number', 'N/A')}")
+                            st.write(f"**Name:** {ticket.get('customer_name', 'N/A')}")
+                            st.write(f"**Email:** {ticket.get('customer_email', 'N/A')}")
+                            st.write(f"**Phone:** {ticket.get('customer_phone', 'N/A')}")
                         
                         with col2:
                             st.write("### Location")
@@ -2809,26 +2809,178 @@ def main():
                     
                     with tab3:
                         st.write("### Ticket History")
-                        notes_query = f"""
+                        journal_query = f"""
                             SELECT note_id, note_text, note_type, created_by, created_at
-                            FROM dbo.Ticket_Notes
+                            FROM dbo.ticket_journal
                             WHERE ticket_id = {st.session_state.view_ticket_id}
                             ORDER BY created_at DESC
                         """
-                        notes_df, notes_error = execute_query(notes_query)
+                        journal_df, journal_error = execute_query(journal_query)
                         
-                        if notes_error:
+                        if journal_error:
                             st.info("No history available. (Ticket_Notes table may not exist yet)")
-                        elif notes_df is None or len(notes_df) == 0:
+                        elif journal_df is None or len(journal_df) == 0:
                             st.info("No history for this ticket yet.")
                         else:
-                            for _, note in notes_df.iterrows():
+                            for _, note in journal_df.iterrows():
                                 st.markdown(f"""
                                 <div class="note-item">
                                     <div class="note-header">{note['note_type']} • {note['created_by']} • {note['created_at']}</div>
                                     <div class="note-text">{note['note_text']}</div>
                                 </div>
                                 """, unsafe_allow_html=True)
+                        
+                        # ADD UPDATE/NOTE FORM
+                        st.markdown("---")
+                        st.write("### 📝 Add Update")
+                        
+                        with st.form("add_ticket_update"):
+                            note_type = st.selectbox("Update Type", [
+                                "Note", "Status Update", "Progress Update", 
+                                "Resolution", "Customer Contact"
+                            ])
+                            note_text = st.text_area("Update Details", height=100,
+                                placeholder="Describe the update, what was done, or next steps...")
+                            is_internal = st.checkbox("Internal Note (not visible to customer)")
+                            
+                            submit_note = st.form_submit_button("Add Update", type="primary")
+                            
+                            if submit_note and note_text.strip():
+                                username = st.session_state.get('username', 'System')
+                                insert_note_query = """
+                                    INSERT INTO dbo.ticket_journal 
+                                        (ticket_id, entry_type, entry_text, created_by, is_internal)
+                                    VALUES (?, ?, ?, ?, ?)
+                                """
+                                success, error = execute_non_query(
+                                    insert_note_query,
+                                    (st.session_state.view_ticket_id, note_type, note_text, username, 
+                                     1 if is_internal else 0)
+                                )
+                                
+                                if success:
+                                    st.success("✅ Update added successfully!")
+                                    st.rerun()
+                                else:
+                                    st.error(f"Failed to add update: {error}")
+            
+            # TICKET EDIT FORM
+            elif st.session_state.edit_ticket_id:
+                st.markdown("---")
+                col1, col2 = st.columns([1, 4])
+                with col1:
+                    if st.button("← Back to Ticket"):
+                        st.session_state.view_ticket_id = st.session_state.edit_ticket_id
+                        st.session_state.edit_ticket_id = None
+                        st.rerun()
+                
+                st.markdown("### ✏️ Edit Ticket")
+                
+                # Load current ticket data
+                edit_query = f"""
+                    SELECT 
+                        ticket_id, status, priority, location,
+                        COALESCE(subject, short_description, '') as subject,
+                        COALESCE(description, '') as description,
+                        COALESCE(assigned_to, '') as assigned_to,
+                        COALESCE(requester_name, customer_name, name, '') as customer_name,
+                        COALESCE(requester_email, customer_email, email, '') as customer_email,
+                        COALESCE(requester_phone, customer_phone, phone_number, phone, '') as customer_phone,
+                        COALESCE(department, '') as department
+                    FROM dbo.Tickets 
+                    WHERE ticket_id = {st.session_state.edit_ticket_id}
+                """
+                ticket_df, edit_err = execute_query(edit_query)
+                
+                if edit_err or ticket_df is None or len(ticket_df) == 0:
+                    st.error("Ticket not found")
+                    st.session_state.edit_ticket_id = None
+                else:
+                    ticket = ticket_df.iloc[0]
+                    
+                    st.info(f"📝 Editing Ticket #{st.session_state.edit_ticket_id}")
+                    
+                    with st.form("edit_ticket_form"):
+                        col1, col2 = st.columns(2)
+                        
+                        with col1:
+                            st.write("### Ticket Details")
+                            subject = st.text_input("Subject", value=ticket.get('subject', ''))
+                            status_options = ["New", "In Progress", "Pending", "Resolved", "Closed"]
+                            current_status = ticket.get('status', 'New')
+                            status_index = status_options.index(current_status) if current_status in status_options else 0
+                            status = st.selectbox("Status", status_options, index=status_index)
+                            
+                            priority_options = ["Low", "Medium", "High", "Critical"]
+                            current_priority = ticket.get('priority', 'Medium')
+                            priority_index = priority_options.index(current_priority) if current_priority in priority_options else 1
+                            priority = st.selectbox("Priority", priority_options, index=priority_index)
+                            
+                            location = st.text_input("Location", value=ticket.get('location', ''))
+                            assigned_to = st.text_input("Assigned To", value=ticket.get('assigned_to', ''))
+                        
+                        with col2:
+                            st.write("### Customer Information")
+                            customer_name = st.text_input("Customer Name", value=ticket.get('customer_name', ''))
+                            customer_email = st.text_input("Email", value=ticket.get('customer_email', ''))
+                            customer_phone = st.text_input("Phone", value=ticket.get('customer_phone', ''))
+                            department = st.text_input("Department", value=ticket.get('department', ''))
+                        
+                        description = st.text_area("Description", value=ticket.get('description', ''), height=150)
+                        
+                        st.markdown("---")
+                        update_note = st.text_area("Update Note (What changed?)", 
+                            placeholder="Optional: Describe what you changed...", height=60)
+                        
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            save_button = st.form_submit_button("💾 Save Changes", type="primary", 
+                                use_container_width=True)
+                        with col2:
+                            cancel_button = st.form_submit_button("❌ Cancel", use_container_width=True)
+                        
+                        if cancel_button:
+                            st.session_state.view_ticket_id = st.session_state.edit_ticket_id
+                            st.session_state.edit_ticket_id = None
+                            st.rerun()
+                        
+                        if save_button:
+                            # Update ticket in database
+                            update_query = """
+                                UPDATE dbo.Tickets SET
+                                    subject = ?,
+                                    status = ?,
+                                    priority = ?,
+                                    location = ?,
+                                    assigned_to = ?,
+                                    description = ?
+                                WHERE ticket_id = ?
+                            """
+                            
+                            success, error = execute_non_query(
+                                update_query,
+                                (subject, status, priority, location, assigned_to, description, 
+                                 st.session_state.edit_ticket_id)
+                            )
+                            
+                            if success:
+                                # Log the update
+                                if update_note.strip():
+                                    username = st.session_state.get('username', 'System')
+                                    log_query = """
+                                        INSERT INTO dbo.ticket_journal 
+                                            (ticket_id, entry_type, entry_text, created_by)
+                                        VALUES (?, 'Ticket Updated', ?, ?)
+                                    """
+                                    execute_non_query(log_query, 
+                                        (st.session_state.edit_ticket_id, update_note, username))
+                                
+                                st.success("✅ Ticket updated successfully!")
+                                st.session_state.view_ticket_id = st.session_state.edit_ticket_id
+                                st.session_state.edit_ticket_id = None
+                                st.rerun()
+                            else:
+                                st.error(f"Failed to update ticket: {error}")
             
             # GALLERY LIST VIEW
             else:
@@ -2899,7 +3051,7 @@ def main():
                             
                             with col1:
                                 ticket_id = ticket.get('ticket_id', 'N/A')
-                                subject = ticket.get('short_description', 'N/A')
+                                subject = ticket.get('subject', 'None')
                                 status = ticket.get('status', 'N/A')
                                 
                                 # Bold new tickets for easy identification
@@ -3049,20 +3201,20 @@ def main():
                     
                     with tab4:
                         st.write("### Asset History")
-                        notes_query = f"""
+                        journal_query = f"""
                             SELECT note_id, note_text, note_type, created_by, created_at
                             FROM dbo.Asset_Notes
                             WHERE asset_id = {st.session_state.view_asset_id}
                             ORDER BY created_at DESC
                         """
-                        notes_df, notes_error = execute_query(notes_query)
+                        journal_df, journal_error = execute_query(journal_query)
                         
-                        if notes_error:
+                        if journal_error:
                             st.info("No history available. (Asset_Notes table may not exist yet)")
-                        elif notes_df is None or len(notes_df) == 0:
+                        elif journal_df is None or len(journal_df) == 0:
                             st.info("No history for this asset yet.")
                         else:
-                            for _, note in notes_df.iterrows():
+                            for _, note in journal_df.iterrows():
                                 st.markdown(f"""
                                 <div class="note-item">
                                     <div class="note-header">{note['note_type']} • {note['created_by']} • {note['created_at']}</div>
@@ -3466,20 +3618,20 @@ def main():
                     
                     with tab3:
                         st.write("### Request History")
-                        notes_query = f"""
+                        journal_query = f"""
                             SELECT note_id, note_text, note_type, created_by, created_at
                             FROM dbo.Procurement_Notes
                             WHERE request_id = {st.session_state.view_procurement_id}
                             ORDER BY created_at DESC
                         """
-                        notes_df, notes_error = execute_query(notes_query)
+                        journal_df, journal_error = execute_query(journal_query)
                         
-                        if notes_error:
+                        if journal_error:
                             st.info("No history available")
-                        elif notes_df is None or len(notes_df) == 0:
+                        elif journal_df is None or len(journal_df) == 0:
                             st.info("No history for this request")
                         else:
-                            for _, note in notes_df.iterrows():
+                            for _, note in journal_df.iterrows():
                                 st.markdown(f"""
                                 <div class="note-item">
                                     <div class="note-header">{note['note_type']} • {note['created_by']} • {note['created_at']}</div>
