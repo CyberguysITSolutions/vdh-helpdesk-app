@@ -2827,6 +2827,10 @@ def main():
                     
                     with tab3:
                         st.write("### Ticket History")
+                        
+                        # VERSION INDICATOR - Remove this after confirming deployment works
+                        st.success("✅ **NEW CODE DEPLOYED** - Version 2.0 with History Fix")
+                        
                         journal_query = f"""
                             SELECT journal_id, entry_text, entry_type, created_by, created_at, is_internal
                             FROM dbo.ticket_journal
@@ -2836,9 +2840,10 @@ def main():
                         journal_df, journal_error = execute_query(journal_query)
                         
                         if journal_error:
-                            st.error(f"Error loading history: {journal_error}")
+                            st.error(f"❌ Error loading history: {journal_error}")
+                            st.info("💡 This usually means the ticket_journal table has an issue. Please check the database.")
                         elif journal_df is None or len(journal_df) == 0:
-                            st.info("No history for this ticket yet.")
+                            st.info("📝 No history for this ticket yet. Add your first update below!")
                         else:
                             for _, note in journal_df.iterrows():
                                 # Show internal tag if it's an internal note
@@ -2854,6 +2859,9 @@ def main():
                         st.markdown("---")
                         st.write("### 📝 Add Update")
                         
+                        # VERSION INDICATOR
+                        st.info("✅ Using ticket_journal table with correct column names (entry_type, entry_text)")
+                        
                         with st.form("add_ticket_update"):
                             note_type = st.selectbox("Update Type", [
                                 "Note", "Status Update", "Progress Update", 
@@ -2866,6 +2874,12 @@ def main():
                             submit_note = st.form_submit_button("Add Update", type="primary")
                             
                             if submit_note and note_text.strip():
+                                st.write("🔍 **DEBUG:** About to insert note...")
+                                st.write(f"- Ticket ID: {st.session_state.view_ticket_id}")
+                                st.write(f"- Note Type: {note_type}")
+                                st.write(f"- Note Text Length: {len(note_text)} chars")
+                                st.write(f"- Is Internal: {is_internal}")
+                                
                                 username = st.session_state.get('username', 'System')
                                 insert_note_query = """
                                     INSERT INTO dbo.ticket_journal 
@@ -2880,9 +2894,12 @@ def main():
                                 
                                 if success:
                                     st.success("✅ Update added successfully!")
+                                    st.balloons()
                                     st.rerun()
                                 else:
-                                    st.error(f"Failed to add update: {error}")
+                                    st.error(f"❌ Failed to add update!")
+                                    st.error(f"**Error Details:** {error}")
+                                    st.info("💡 Check that the ticket_journal table exists and has the correct columns.")
             
             # TICKET EDIT FORM
             elif st.session_state.edit_ticket_id:
