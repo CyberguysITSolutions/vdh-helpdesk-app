@@ -2459,6 +2459,13 @@ def main():
         </a>
     """, unsafe_allow_html=True)
     
+    # QUICK CREATE TICKET BUTTON
+    st.sidebar.markdown("### ⚡ Quick Actions")
+    if st.sidebar.button("➕ Create Ticket", use_container_width=True, type="primary", key="quick_create_ticket"):
+        st.session_state.page = "🎫 Helpdesk Tickets"
+        st.session_state.quick_create_ticket = True
+        st.rerun()
+    
     st.sidebar.markdown("---")
 
 
@@ -2540,6 +2547,7 @@ def main():
         "🛒 Procurement Requests",
         "🚗 Fleet Management",
         "📦 Resource Management",
+        "📊 Distribution Platform",
         "📈 Report Builder",
         "🔌 Connection Test",
     ]
@@ -2728,6 +2736,69 @@ def main():
             st.session_state.view_ticket_id = None
         if 'edit_ticket_id' not in st.session_state:
             st.session_state.edit_ticket_id = None
+        if 'quick_create_ticket' not in st.session_state:
+            st.session_state.quick_create_ticket = False
+        
+        # QUICK CREATE TICKET FORM (triggered from sidebar button)
+        if st.session_state.quick_create_ticket:
+            st.info("⚡ Quick Create Ticket")
+            
+            with st.form("quick_create_ticket_form"):
+                col1, col2 = st.columns(2)
+                with col1:
+                    subject = st.text_input("Subject *", placeholder="Brief description of issue")
+                    priority = st.selectbox("Priority *", ["Low", "Medium", "High", "Critical"])
+                    location = st.selectbox("Location *", 
+                        ["", "Crater", "Dinwiddie County", "Greensville/Emporia", 
+                         "Surry County", "Prince George", "Sussex County", "Hopewell", "Petersburg"])
+                
+                with col2:
+                    customer_name = st.text_input("Your Name *")
+                    customer_email = st.text_input("Your Email *")
+                    customer_phone = st.text_input("Phone", placeholder="Optional")
+                
+                description = st.text_area("Description *", height=100, 
+                    placeholder="Please describe the issue in detail...")
+                
+                col1, col2 = st.columns(2)
+                with col1:
+                    submit_btn = st.form_submit_button("✅ Create Ticket", type="primary", use_container_width=True)
+                with col2:
+                    cancel_btn = st.form_submit_button("❌ Cancel", use_container_width=True)
+                
+                if cancel_btn:
+                    st.session_state.quick_create_ticket = False
+                    st.rerun()
+                
+                if submit_btn:
+                    if not subject or not customer_name or not customer_email or not description or not location:
+                        st.error("❌ Please fill in all required fields!")
+                    else:
+                        username = st.session_state.get('username', 'System')
+                        
+                        insert_query = """
+                            INSERT INTO dbo.Tickets 
+                                (subject, description, priority, status, location, 
+                                 customer_name, customer_email, customer_phone, 
+                                 assigned_to, created_at)
+                            VALUES (?, ?, ?, 'New', ?, ?, ?, ?, ?, GETDATE())
+                        """
+                        
+                        success, error = execute_non_query(
+                            insert_query,
+                            (subject, description, priority, location, 
+                             customer_name, customer_email, customer_phone, username)
+                        )
+                        
+                        if success:
+                            st.success(f"✅ Ticket created successfully!")
+                            st.balloons()
+                            st.session_state.quick_create_ticket = False
+                            st.rerun()
+                        else:
+                            st.error(f"❌ Failed to create ticket: {error}")
+            
+            st.markdown("---")
         
         if not DB_AVAILABLE:
             st.warning("Database unavailable. Showing demo tickets.")
@@ -5186,6 +5257,362 @@ def main():
 
     elif page == "📦 Resource Management":
         render_resource_management()
+    
+    elif page == "📊 Distribution Platform":
+        st.header("📊 Distribution Platform")
+        st.markdown("**Barcode Scanning & Inventory Distribution System**")
+        
+        # Sub-navigation
+        dist_tab = st.radio(
+            "Select Action:",
+            ["📊 Dashboard", "📥 Scan In (Receive)", "📤 Scan Out (Distribute)", 
+             "🔍 Barcode Lookup", "📋 Transaction History"],
+            horizontal=True,
+            label_visibility="collapsed"
+        )
+        
+        st.markdown("---")
+        
+        if dist_tab == "📊 Dashboard":
+            st.subheader("📊 Distribution Dashboard")
+            
+            col1, col2, col3, col4 = st.columns(4)
+            
+            # Get inventory summary
+            summary_query = """
+                SELECT 
+                    COUNT(DISTINCT ri.resource_id) as total_items,
+                    SUM(ri.quantity_available) as total_units,
+                    COUNT(DISTINCT CASE WHEN ri.quantity_available < r.reorder_level THEN ri.resource_id END) as low_stock_items,
+                    COUNT(DISTINCT CASE WHEN ri.quantity_available = 0 THEN ri.resource_id END) as out_of_stock
+                FROM dbo.resource_inventory ri
+                JOIN dbo.resources r ON ri.resource_id = r.resource_id
+            """
+            summary_df, summary_err = execute_query(summary_query)
+            
+            if not summary_err and summary_df is not None and not summary_df.empty:
+                summary = summary_df.iloc[0]
+                
+                with col1:
+                    st.metric("Total Items", f"{summary['total_items']:,}")
+                with col2:
+                    st.metric("Total Units", f"{summary['total_units']:,}")
+                with col3:
+                    st.metric("Low Stock", f"{summary['low_stock_items']:,}", delta=None if summary['low_stock_items'] == 0 else "⚠️")
+                with col4:
+                    st.metric("Out of Stock", f"{summary['out_of_stock']:,}", delta=None if summary['out_of_stock'] == 0 else "🚨")
+            
+            st.markdown("---")
+            
+            # Recent transactions
+            st.subheader("📋 Recent Transactions (Last 24 Hours)")
+            
+            recent_query = """
+                SELECT TOP 10
+                    rt.transaction_id,
+                    r.resource_name,
+                    r.upc_code,
+                    rt.transaction_type,
+                    rt.quantity,
+                    rl.location_name,
+                    rt.created_by,
+                    rt.created_at
+                FROM dbo.resource_transactions rt
+                JOIN dbo.resources r ON rt.resource_id = r.resource_id
+                JOIN dbo.resource_locations rl ON rt.location_id = rl.location_id
+                WHERE rt.created_at >= DATEADD(day, -1, GETDATE())
+                ORDER BY rt.created_at DESC
+            """
+            recent_df, recent_err = execute_query(recent_query)
+            
+            if not recent_err and recent_df is not None and not recent_df.empty:
+                st.dataframe(recent_df, use_container_width=True)
+            else:
+                st.info("No recent transactions in the last 24 hours.")
+        
+        elif dist_tab == "📥 Scan In (Receive)":
+            st.subheader("📥 Scan In Items (Receiving)")
+            
+            with st.form("scan_in_form"):
+                st.write("**Scan or Enter UPC Code:**")
+                upc_code = st.text_input("UPC/Barcode", key="scan_in_upc", label_visibility="collapsed")
+                
+                col1, col2 = st.columns(2)
+                with col1:
+                    # Get locations for dropdown
+                    locations_df = get_resource_locations()
+                    location_options = [""] + locations_df['location_name'].tolist() if locations_df is not None else [""]
+                    location = st.selectbox("Location", location_options)
+                
+                with col2:
+                    quantity = st.number_input("Quantity", min_value=1, value=1)
+                
+                notes = st.text_area("Notes", placeholder="Optional notes about this transaction...")
+                
+                scan_in_btn = st.form_submit_button("✅ Record Scan In", type="primary", use_container_width=True)
+                
+                if scan_in_btn:
+                    if not upc_code or not location:
+                        st.error("❌ Please enter UPC code and select a location!")
+                    else:
+                        # Look up resource by UPC
+                        lookup_query = "SELECT resource_id, resource_name FROM dbo.resources WHERE upc_code = ?"
+                        lookup_df, lookup_err = execute_query(lookup_query, (upc_code,))
+                        
+                        if lookup_err or lookup_df is None or lookup_df.empty:
+                            st.error(f"❌ Resource not found with UPC: {upc_code}")
+                        else:
+                            resource_id = lookup_df.iloc[0]['resource_id']
+                            resource_name = lookup_df.iloc[0]['resource_name']
+                            
+                            # Get location_id
+                            loc_query = "SELECT location_id FROM dbo.resource_locations WHERE location_name = ?"
+                            loc_df, loc_err = execute_query(loc_query, (location,))
+                            
+                            if loc_err or loc_df is None or loc_df.empty:
+                                st.error("❌ Invalid location!")
+                            else:
+                                location_id = loc_df.iloc[0]['location_id']
+                                username = st.session_state.get('username', 'System')
+                                
+                                # Record transaction
+                                trans_query = """
+                                    INSERT INTO dbo.resource_transactions 
+                                        (resource_id, location_id, transaction_type, quantity, notes, created_by)
+                                    VALUES (?, ?, 'Scan In', ?, ?, ?)
+                                """
+                                success, error = execute_non_query(trans_query, 
+                                    (resource_id, location_id, quantity, notes, username))
+                                
+                                if success:
+                                    # Update inventory
+                                    inv_update = """
+                                        UPDATE dbo.resource_inventory
+                                        SET quantity_available = quantity_available + ?
+                                        WHERE resource_id = ? AND location_id = ?
+                                    """
+                                    execute_non_query(inv_update, (quantity, resource_id, location_id))
+                                    
+                                    st.success(f"✅ Scanned in {quantity} units of {resource_name}!")
+                                    st.balloons()
+                                    st.rerun()
+                                else:
+                                    st.error(f"❌ Failed to record scan: {error}")
+        
+        elif dist_tab == "📤 Scan Out (Distribute)":
+            st.subheader("📤 Scan Out Items (Distribution)")
+            
+            with st.form("scan_out_form"):
+                st.write("**Scan or Enter UPC Code:**")
+                upc_code = st.text_input("UPC/Barcode", key="scan_out_upc", label_visibility="collapsed")
+                
+                col1, col2 = st.columns(2)
+                with col1:
+                    # Get locations for dropdown
+                    locations_df = get_resource_locations()
+                    location_options = [""] + locations_df['location_name'].tolist() if locations_df is not None else [""]
+                    location = st.selectbox("From Location", location_options)
+                
+                with col2:
+                    quantity = st.number_input("Quantity", min_value=1, value=1)
+                
+                recipient = st.text_input("Recipient/Destination", placeholder="Who is receiving these items?")
+                notes = st.text_area("Notes", placeholder="Optional notes about this distribution...")
+                
+                scan_out_btn = st.form_submit_button("📤 Record Scan Out", type="primary", use_container_width=True)
+                
+                if scan_out_btn:
+                    if not upc_code or not location or not recipient:
+                        st.error("❌ Please enter UPC code, location, and recipient!")
+                    else:
+                        # Look up resource by UPC
+                        lookup_query = "SELECT resource_id, resource_name FROM dbo.resources WHERE upc_code = ?"
+                        lookup_df, lookup_err = execute_query(lookup_query, (upc_code,))
+                        
+                        if lookup_err or lookup_df is None or lookup_df.empty:
+                            st.error(f"❌ Resource not found with UPC: {upc_code}")
+                        else:
+                            resource_id = lookup_df.iloc[0]['resource_id']
+                            resource_name = lookup_df.iloc[0]['resource_name']
+                            
+                            # Get location_id
+                            loc_query = "SELECT location_id FROM dbo.resource_locations WHERE location_name = ?"
+                            loc_df, loc_err = execute_query(loc_query, (location,))
+                            
+                            if loc_err or loc_df is None or loc_df.empty:
+                                st.error("❌ Invalid location!")
+                            else:
+                                location_id = loc_df.iloc[0]['location_id']
+                                
+                                # Check available quantity
+                                avail_query = """
+                                    SELECT quantity_available 
+                                    FROM dbo.resource_inventory
+                                    WHERE resource_id = ? AND location_id = ?
+                                """
+                                avail_df, avail_err = execute_query(avail_query, (resource_id, location_id))
+                                
+                                if avail_err or avail_df is None or avail_df.empty:
+                                    st.error("❌ No inventory found at this location!")
+                                elif avail_df.iloc[0]['quantity_available'] < quantity:
+                                    st.error(f"❌ Insufficient quantity! Only {avail_df.iloc[0]['quantity_available']} available.")
+                                else:
+                                    username = st.session_state.get('username', 'System')
+                                    full_notes = f"Recipient: {recipient}. {notes}"
+                                    
+                                    # Record transaction
+                                    trans_query = """
+                                        INSERT INTO dbo.resource_transactions 
+                                            (resource_id, location_id, transaction_type, quantity, notes, created_by)
+                                        VALUES (?, ?, 'Scan Out', ?, ?, ?)
+                                    """
+                                    success, error = execute_non_query(trans_query, 
+                                        (resource_id, location_id, quantity, full_notes, username))
+                                    
+                                    if success:
+                                        # Update inventory
+                                        inv_update = """
+                                            UPDATE dbo.resource_inventory
+                                            SET quantity_available = quantity_available - ?
+                                            WHERE resource_id = ? AND location_id = ?
+                                        """
+                                        execute_non_query(inv_update, (quantity, resource_id, location_id))
+                                        
+                                        st.success(f"✅ Distributed {quantity} units of {resource_name} to {recipient}!")
+                                        st.rerun()
+                                    else:
+                                        st.error(f"❌ Failed to record distribution: {error}")
+        
+        elif dist_tab == "🔍 Barcode Lookup":
+            st.subheader("🔍 Barcode Lookup")
+            
+            upc_search = st.text_input("Enter UPC/Barcode to lookup:", key="lookup_upc")
+            
+            if upc_search:
+                # Look up resource
+                lookup_query = """
+                    SELECT 
+                        r.resource_id,
+                        r.resource_name,
+                        r.upc_code,
+                        rc.category_name,
+                        r.unit_of_measure,
+                        r.reorder_level,
+                        r.created_at
+                    FROM dbo.resources r
+                    JOIN dbo.resource_categories rc ON r.category_id = rc.category_id
+                    WHERE r.upc_code = ?
+                """
+                lookup_df, lookup_err = execute_query(lookup_query, (upc_search,))
+                
+                if lookup_err or lookup_df is None or lookup_df.empty:
+                    st.warning(f"⚠️ No resource found with UPC: {upc_search}")
+                else:
+                    resource = lookup_df.iloc[0]
+                    
+                    st.success(f"✅ Found: **{resource['resource_name']}**")
+                    
+                    col1, col2, col3 = st.columns(3)
+                    with col1:
+                        st.metric("Category", resource['category_name'])
+                    with col2:
+                        st.metric("Unit", resource['unit_of_measure'])
+                    with col3:
+                        st.metric("Reorder Level", resource['reorder_level'])
+                    
+                    st.markdown("---")
+                    
+                    # Show inventory by location
+                    st.subheader("📍 Inventory by Location")
+                    
+                    inv_query = """
+                        SELECT 
+                            rl.location_name,
+                            ri.quantity_available,
+                            ri.quantity_allocated,
+                            ri.last_counted,
+                            CASE 
+                                WHEN ri.quantity_available = 0 THEN 'Out of Stock'
+                                WHEN ri.quantity_available < ? THEN 'Low Stock'
+                                ELSE 'In Stock'
+                            END as status
+                        FROM dbo.resource_inventory ri
+                        JOIN dbo.resource_locations rl ON ri.location_id = rl.location_id
+                        WHERE ri.resource_id = ?
+                        ORDER BY rl.location_name
+                    """
+                    inv_df, inv_err = execute_query(inv_query, 
+                        (resource['reorder_level'], resource['resource_id']))
+                    
+                    if not inv_err and inv_df is not None and not inv_df.empty:
+                        st.dataframe(inv_df, use_container_width=True)
+                    else:
+                        st.info("No inventory records found.")
+        
+        elif dist_tab == "📋 Transaction History":
+            st.subheader("📋 Transaction History")
+            
+            # Filters
+            col1, col2, col3 = st.columns(3)
+            
+            with col1:
+                trans_type_filter = st.selectbox("Transaction Type", 
+                    ["All", "Scan In", "Scan Out", "Adjustment", "Transfer"])
+            
+            with col2:
+                locations_df = get_resource_locations()
+                location_options = ["All"] + (locations_df['location_name'].tolist() if locations_df is not None else [])
+                location_filter = st.selectbox("Location", location_options)
+            
+            with col3:
+                days_back = st.number_input("Days Back", min_value=1, max_value=90, value=7)
+            
+            # Build query
+            history_query = """
+                SELECT 
+                    rt.transaction_id,
+                    r.resource_name,
+                    r.upc_code,
+                    rt.transaction_type,
+                    rt.quantity,
+                    rl.location_name,
+                    rt.notes,
+                    rt.created_by,
+                    rt.created_at
+                FROM dbo.resource_transactions rt
+                JOIN dbo.resources r ON rt.resource_id = r.resource_id
+                JOIN dbo.resource_locations rl ON rt.location_id = rl.location_id
+                WHERE rt.created_at >= DATEADD(day, -?, GETDATE())
+            """
+            params = [days_back]
+            
+            if trans_type_filter != "All":
+                history_query += " AND rt.transaction_type = ?"
+                params.append(trans_type_filter)
+            
+            if location_filter != "All":
+                history_query += " AND rl.location_name = ?"
+                params.append(location_filter)
+            
+            history_query += " ORDER BY rt.created_at DESC"
+            
+            history_df, history_err = execute_query(history_query, tuple(params))
+            
+            if not history_err and history_df is not None and not history_df.empty:
+                st.write(f"**Showing {len(history_df)} transactions:**")
+                st.dataframe(history_df, use_container_width=True)
+                
+                # Download button
+                csv = history_df.to_csv(index=False)
+                st.download_button(
+                    "📥 Download CSV",
+                    csv,
+                    "distribution_transactions.csv",
+                    "text/csv",
+                    key='download-csv'
+                )
+            else:
+                st.info("No transactions found for the selected filters.")
 
     st.markdown("---")
     st.markdown("*VDH Service Center - Comprehensive Management System | Virginia Department of Health © 2025*")
