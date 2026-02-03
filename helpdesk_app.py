@@ -2721,30 +2721,6 @@ def main():
 
     # CONNECTED MODE: Helpdesk Tickets - attempt to list tickets when DB_AVAILABLE is True
     elif page == "🎫 Helpdesk Tickets":
-        
-        # ============================================================================
-        # VERSION BANNER - REMOVE THIS AFTER CONFIRMING DEPLOYMENT WORKS
-        # ============================================================================
-        st.markdown("""
-        <div style="background: linear-gradient(90deg, #00C851 0%, #007E33 100%); 
-                    padding: 20px; 
-                    border-radius: 10px; 
-                    margin-bottom: 20px;
-                    border: 3px solid #00C851;
-                    box-shadow: 0 4px 6px rgba(0,0,0,0.3);">
-            <h1 style="color: white; text-align: center; margin: 0; font-size: 32px;">
-                ✅ NEW CODE DEPLOYED - VERSION 2.0
-            </h1>
-            <h3 style="color: white; text-align: center; margin: 10px 0 0 0; font-size: 20px;">
-                History Fix Active • Using ticket_journal table
-            </h3>
-            <p style="color: white; text-align: center; margin: 5px 0 0 0; font-size: 14px;">
-                If you see this banner, the new code is running! 🎉
-            </p>
-        </div>
-        """, unsafe_allow_html=True)
-        # ============================================================================
-        
         st.header("🎫 Helpdesk Tickets")
         
         # Initialize session states
@@ -2852,9 +2828,6 @@ def main():
                     with tab3:
                         st.write("### Ticket History")
                         
-                        # VERSION INDICATOR - Remove this after confirming deployment works
-                        st.success("✅ **NEW CODE DEPLOYED** - Version 2.0 with History Fix")
-                        
                         journal_query = f"""
                             SELECT journal_id, entry_text, entry_type, created_by, created_at, is_internal
                             FROM dbo.ticket_journal
@@ -2883,9 +2856,6 @@ def main():
                         st.markdown("---")
                         st.write("### 📝 Add Update")
                         
-                        # VERSION INDICATOR
-                        st.info("✅ Using ticket_journal table with correct column names (entry_type, entry_text)")
-                        
                         with st.form("add_ticket_update"):
                             note_type = st.selectbox("Update Type", [
                                 "Note", "Status Update", "Progress Update", 
@@ -2898,12 +2868,6 @@ def main():
                             submit_note = st.form_submit_button("Add Update", type="primary")
                             
                             if submit_note and note_text.strip():
-                                st.write("🔍 **DEBUG:** About to insert note...")
-                                st.write(f"- Ticket ID: {st.session_state.view_ticket_id}")
-                                st.write(f"- Note Type: {note_type}")
-                                st.write(f"- Note Text Length: {len(note_text)} chars")
-                                st.write(f"- Is Internal: {is_internal}")
-                                
                                 username = st.session_state.get('username', 'System')
                                 insert_note_query = """
                                     INSERT INTO dbo.ticket_journal 
@@ -2918,12 +2882,9 @@ def main():
                                 
                                 if success:
                                     st.success("✅ Update added successfully!")
-                                    st.balloons()
                                     st.rerun()
                                 else:
-                                    st.error(f"❌ Failed to add update!")
-                                    st.error(f"**Error Details:** {error}")
-                                    st.info("💡 Check that the ticket_journal table exists and has the correct columns.")
+                                    st.error(f"Failed to add update: {error}")
             
             # TICKET EDIT FORM
             elif st.session_state.edit_ticket_id:
@@ -2936,9 +2897,6 @@ def main():
                         st.rerun()
                 
                 st.markdown("### ✏️ Edit Ticket")
-                
-                # Debug info
-                st.info(f"🔍 Debug: Attempting to load ticket ID: {st.session_state.edit_ticket_id}")
                 
                 # Load current ticket data
                 edit_query = f"""
@@ -2962,9 +2920,6 @@ def main():
                     st.session_state.edit_ticket_id = None
                 else:
                     ticket = ticket_df.iloc[0]
-                    
-                    # DEBUG: Show current ticket status
-                    st.warning(f"🔍 **DEBUG:** Current ticket status in database: `{repr(ticket.get('status'))}`")
                     
                     st.info(f"📝 Editing Ticket #{st.session_state.edit_ticket_id}")
                     
@@ -3064,12 +3019,6 @@ def main():
                             st.rerun()
                         
                         if save_button:
-                            # DEBUG: Show what we're trying to save
-                            st.write("🔍 **DEBUG INFO:**")
-                            st.write(f"- Status being saved: `{status}`")
-                            st.write(f"- Status type: {type(status)}")
-                            st.write(f"- Status repr: {repr(status)}")
-                            
                             # Update ticket in database
                             update_query = """
                                 UPDATE dbo.Tickets SET
