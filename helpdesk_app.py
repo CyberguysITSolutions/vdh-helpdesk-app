@@ -2721,6 +2721,30 @@ def main():
 
     # CONNECTED MODE: Helpdesk Tickets - attempt to list tickets when DB_AVAILABLE is True
     elif page == "🎫 Helpdesk Tickets":
+        
+        # ============================================================================
+        # VERSION BANNER - REMOVE THIS AFTER CONFIRMING DEPLOYMENT WORKS
+        # ============================================================================
+        st.markdown("""
+        <div style="background: linear-gradient(90deg, #00C851 0%, #007E33 100%); 
+                    padding: 20px; 
+                    border-radius: 10px; 
+                    margin-bottom: 20px;
+                    border: 3px solid #00C851;
+                    box-shadow: 0 4px 6px rgba(0,0,0,0.3);">
+            <h1 style="color: white; text-align: center; margin: 0; font-size: 32px;">
+                ✅ NEW CODE DEPLOYED - VERSION 2.0
+            </h1>
+            <h3 style="color: white; text-align: center; margin: 10px 0 0 0; font-size: 20px;">
+                History Fix Active • Using ticket_journal table
+            </h3>
+            <p style="color: white; text-align: center; margin: 5px 0 0 0; font-size: 14px;">
+                If you see this banner, the new code is running! 🎉
+            </p>
+        </div>
+        """, unsafe_allow_html=True)
+        # ============================================================================
+        
         st.header("🎫 Helpdesk Tickets")
         
         # Initialize session states
