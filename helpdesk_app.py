@@ -102,6 +102,18 @@ def safe_st_image(path_or_bytes, width: Optional[int] = None, use_container_widt
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Standard VDH Locations for dropdowns
+STANDARD_LOCATIONS = [
+    "", # Empty option for "no selection"
+    "Petersburg",
+    "Dinwiddie",
+    "Sussex", 
+    "Surry",
+    "Prince George",
+    "Hopewell",
+    "Greensville/Emporia"
+]
+
 # Database helpers
 @st.cache_resource
 def get_connection_string():
@@ -865,7 +877,7 @@ def render_procurement_request_public_form():
     with st.form("public_procurement_form", clear_on_submit=False):
         requester = st.text_input("Requester name", "")
         email = st.text_input("Requester email", "")
-        location = st.text_input("Location", "")
+        location = st.selectbox("Location", STANDARD_LOCATIONS)
         items = st.text_area("Items / Description", height=150)
         total = st.text_input("Estimated total amount", "")
         submitted = st.form_submit_button("Submit Requisition")
@@ -2801,11 +2813,59 @@ def main():
     # User profile section
     username = st.session_state.get("username", "User")
     st.sidebar.markdown(f"### 👤 {username}")
-    if st.sidebar.button("🚪 Logout", use_container_width=True, key="logout_btn"):
-        # Clear session state
-        for key in list(st.session_state.keys()):
-            del st.session_state[key]
-        st.rerun()
+    
+    # NAVIGATION DROPDOWN (moved here from later in code)
+    # Get pending counts for navigation badges (pass DB_AVAILABLE)
+    pending_counts = get_pending_counts(DB_AVAILABLE)
+    
+    # Define page options
+    page_options = [
+        "📊 Dashboard",
+        "🎫 Helpdesk Tickets",
+        "💻 Asset Management",
+        "🛒 Procurement Requests",
+        "🚗 Fleet Management",
+        "📦 Resource Management",
+        "📈 Report Builder",
+        "🔌 Connection Test",
+    ]
+    
+    # Add badges to options
+    page_options_display = []
+    for option in page_options:
+        display_option = option
+        if "Fleet Management" in option and pending_counts['vehicle_requests'] > 0:
+            display_option = f"{option} 🔴 {pending_counts['vehicle_requests']}"
+        elif "Helpdesk Tickets" in option and pending_counts['new_tickets'] > 0:
+            display_option = f"{option} 🔴 {pending_counts['new_tickets']}"
+        elif "Procurement Requests" in option and pending_counts['procurement_requests'] > 0:
+            display_option = f"{option} 🔴 {pending_counts['procurement_requests']}"
+        page_options_display.append(display_option)
+    
+    # Fix double-click issue with session state
+    if 'current_page' not in st.session_state:
+        st.session_state.current_page = "📊 Dashboard"
+    
+    # Find index of current page in display options
+    try:
+        default_index = next(i for i, opt in enumerate(page_options_display) if st.session_state.current_page in opt)
+    except StopIteration:
+        default_index = 0
+    
+    page = st.sidebar.selectbox(
+        "Navigate",
+        page_options_display,
+        index=default_index,
+        label_visibility="collapsed",
+        key="page_selector"
+    )
+
+    page = page.split(" 🔴")[0]  # Strip badge from selection
+    
+    # Update session state when page changes
+    if page != st.session_state.current_page:
+        st.session_state.current_page = page
+    
     st.sidebar.markdown("---")
     
     # VDH Employee Center Link
@@ -2870,6 +2930,14 @@ def main():
             '</style>'
         )
         st.markdown(html_links, unsafe_allow_html=True)
+        
+        # LOGOUT BUTTON (moved to bottom)
+        st.markdown("---")
+        if st.button("🚪 Logout", use_container_width=True, key="logout_btn"):
+            # Clear session state
+            for key in list(st.session_state.keys()):
+                del st.session_state[key]
+            st.rerun()
 
     try:
         # CRITICAL FIX: Check if DB credentials exist BEFORE attempting connection
@@ -2896,57 +2964,7 @@ def main():
         DB_AVAILABLE = False
         logger.error("Error checking DB: %s", e)
 
-    # Get pending counts for navigation badges (pass DB_AVAILABLE)
-    pending_counts = get_pending_counts(DB_AVAILABLE)
-    
-    # Define page options
-    # Define page options
-    page_options = [
-        "📊 Dashboard",
-        "🎫 Helpdesk Tickets",
-        "💻 Asset Management",
-        "🛒 Procurement Requests",
-        "🚗 Fleet Management",
-        "📦 Resource Management",
-        "📈 Report Builder",
-        "🔌 Connection Test",
-    ]
-    
-    # Add badges to options
-    page_options_display = []
-    for option in page_options:
-        display_option = option
-        if "Fleet Management" in option and pending_counts['vehicle_requests'] > 0:
-            display_option = f"{option} 🔴 {pending_counts['vehicle_requests']}"
-        elif "Helpdesk Tickets" in option and pending_counts['new_tickets'] > 0:
-            display_option = f"{option} 🔴 {pending_counts['new_tickets']}"
-        elif "Procurement Requests" in option and pending_counts['procurement_requests'] > 0:
-            display_option = f"{option} 🔴 {pending_counts['procurement_requests']}"
-        page_options_display.append(display_option)
-    
-    # Fix double-click issue with session state
-    if 'current_page' not in st.session_state:
-        st.session_state.current_page = "📊 Dashboard"
-    
-    # Find index of current page in display options
-    try:
-        default_index = next(i for i, opt in enumerate(page_options_display) if st.session_state.current_page in opt)
-    except StopIteration:
-        default_index = 0
-    
-    page = st.sidebar.selectbox(
-        "Navigate",
-        page_options_display,
-        index=default_index,
-        label_visibility="collapsed",
-        key="page_selector"
-    )
-
-    page = page.split(" 🔴")[0]  # Strip badge from selection
-    
-    # Update session state when page changes
-    if page != st.session_state.current_page:
-        st.session_state.current_page = page
+    # Navigation and pending counts already handled in sidebar above
     
     if not DB_AVAILABLE and page != "📊 Dashboard":
         st.header(page)
@@ -3114,9 +3132,7 @@ def main():
                 with col1:
                     subject = st.text_input("Subject *", placeholder="Brief description of issue")
                     priority = st.selectbox("Priority *", ["Low", "Medium", "High", "Critical"])
-                    location = st.selectbox("Location *", 
-                        ["", "Crater", "Dinwiddie County", "Greensville/Emporia", 
-                         "Surry County", "Prince George", "Sussex County", "Hopewell", "Petersburg"])
+                    location = st.selectbox("Location *", STANDARD_LOCATIONS)
                 
                 with col2:
                     customer_name = st.text_input("Your Name *")
@@ -3424,7 +3440,9 @@ def main():
                             priority_index = priority_options.index(current_priority) if current_priority in priority_options else 1
                             priority = st.selectbox("Priority", priority_options, index=priority_index)
                             
-                            location = st.text_input("Location", value=ticket.get('location') or '')
+                            current_location = ticket.get('location') or ''
+                            location_index = STANDARD_LOCATIONS.index(current_location) if current_location in STANDARD_LOCATIONS else 0
+                            location = st.selectbox("Location", STANDARD_LOCATIONS, index=location_index)
                             assigned_to = st.text_input("Assigned To", value=ticket.get('assigned_to') or '')
                         
                         with col2:
@@ -3648,6 +3666,14 @@ def main():
             st.session_state.view_asset_id = None
         if 'edit_asset_id' not in st.session_state:
             st.session_state.edit_asset_id = None
+        if 'add_new_asset' not in st.session_state:
+            st.session_state.add_new_asset = False
+        
+        # ADD ASSET BUTTON (only show when not viewing/editing/adding)
+        if DB_AVAILABLE and not st.session_state.view_asset_id and not st.session_state.edit_asset_id and not st.session_state.add_new_asset:
+            if st.button("➕ Add New Asset", type="primary", key="add_asset_btn"):
+                st.session_state.add_new_asset = True
+                st.rerun()
         
         if not DB_AVAILABLE:
             st.warning("Database unavailable. Showing demo assets.")
