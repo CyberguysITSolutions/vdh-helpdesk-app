@@ -3678,6 +3678,117 @@ def main():
                 st.session_state.add_new_asset = True
                 st.rerun()
         
+        # ADD NEW ASSET FORM (popup style like ticket creation)
+        if st.session_state.add_new_asset:
+            st.markdown("---")
+            st.info("⚡ Add New Asset")
+            
+            with st.form("add_asset_form", clear_on_submit=False):
+                st.markdown("### Asset Information")
+                
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    asset_tag = st.text_input("Asset Tag *", placeholder="e.g., VDH-LAP-001")
+                    
+                    asset_type = st.selectbox("Type *", [
+                        "", "Laptop", "Desktop", "Tablet", "Phone", "Monitor", 
+                        "Printer", "Scanner", "Router", "Switch", "Server", "Other"
+                    ])
+                    
+                    category = st.selectbox("Category *", [
+                        "", "Computer", "Peripheral", "Network", "Furniture", 
+                        "Software", "Other"
+                    ])
+                    
+                    make_model = st.text_input("Make/Model", placeholder="e.g., Dell Latitude 5520")
+                    
+                    location = st.selectbox("Location *", STANDARD_LOCATIONS)
+                
+                with col2:
+                    purchase_date = st.date_input("Purchase Date", value=None)
+                    
+                    warranty_expires = st.date_input("Warranty Expires", value=None)
+                    
+                    status = st.selectbox("Status *", [
+                        "In-Stock", "Deployed", "Surplus", "Unaccounted"
+                    ])
+                
+                st.markdown("### Assigned To (Optional)")
+                st.caption("If this asset is assigned to someone, enter their information below:")
+                
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    assigned_first_name = st.text_input("First Name", key="asset_first_name")
+                    assigned_last_name = st.text_input("Last Name", key="asset_last_name")
+                
+                with col2:
+                    assigned_email = st.text_input("Email", key="asset_email")
+                    assigned_phone = st.text_input("Phone", key="asset_phone")
+                
+                st.markdown("---")
+                
+                col1, col2 = st.columns(2)
+                with col1:
+                    submit_btn = st.form_submit_button("✅ Add Asset", type="primary", use_container_width=True)
+                with col2:
+                    cancel_btn = st.form_submit_button("❌ Cancel", use_container_width=True)
+                
+                if cancel_btn:
+                    st.session_state.add_new_asset = False
+                    st.rerun()
+                
+                if submit_btn:
+                    # Validation
+                    if not asset_tag or not asset_type or not category or not location or not status:
+                        st.error("❌ Please fill in all required fields (marked with *)")
+                    else:
+                        # Build assigned_user string
+                        assigned_user = ""
+                        if assigned_first_name or assigned_last_name:
+                            assigned_user = f"{assigned_first_name} {assigned_last_name}".strip()
+                        
+                        # Insert into database
+                        insert_query = """
+                            INSERT INTO dbo.Assets 
+                                (asset_tag, type, category, model, assigned_user, assigned_email, 
+                                 assigned_phone, location, purchase_date, warranty_expires, status, 
+                                 created_at, updated_at)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, GETDATE(), GETDATE())
+                        """
+                        
+                        try:
+                            conn = get_db_connection()
+                            cursor = conn.cursor()
+                            cursor.execute(
+                                insert_query,
+                                asset_tag, asset_type, category, make_model, assigned_user, 
+                                assigned_email, assigned_phone, location, purchase_date, 
+                                warranty_expires, status
+                            )
+                            conn.commit()
+                            cursor.close()
+                            conn.close()
+                            
+                            st.success(f"✅ Asset '{asset_tag}' added successfully!")
+                            
+                            import time
+                            time.sleep(1.5)
+                            
+                            st.session_state.add_new_asset = False
+                            st.rerun()
+                            
+                        except Exception as e:
+                            st.error(f"❌ Error adding asset: {str(e)}")
+            
+            # Show back button outside the form
+            if st.button("← Back to Asset List", key="back_from_add_asset"):
+                st.session_state.add_new_asset = False
+                st.rerun()
+            
+            return  # Exit early so we don't show asset list while adding
+        
         if not DB_AVAILABLE:
             st.warning("Database unavailable. Showing demo assets.")
             demo_assets = pd.DataFrame([
