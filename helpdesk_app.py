@@ -2731,6 +2731,9 @@ def main():
         render_login_page()
         return
 
+    # Initialize DB_AVAILABLE (will be set to True if connection succeeds)
+    DB_AVAILABLE = False
+
     st.markdown(
         """
         <style>
