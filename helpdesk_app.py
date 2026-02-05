@@ -3703,12 +3703,14 @@ def main():
                     
                     make_model = st.text_input("Make/Model", placeholder="e.g., Dell Latitude 5520")
                     
+                    serial = st.text_input("Serial Number", placeholder="e.g., 654321abc")
+                    
                     location = st.selectbox("Location *", STANDARD_LOCATIONS)
                 
                 with col2:
                     purchase_date = st.date_input("Purchase Date", value=None)
                     
-                    warranty_expires = st.date_input("Warranty Expires", value=None)
+                    warranty_expiration = st.date_input("Warranty Expires", value=None)
                     
                     status = st.selectbox("Status *", [
                         "In-Stock", "Deployed", "Surplus", "Unaccounted"
@@ -3752,10 +3754,10 @@ def main():
                         # Insert into database
                         insert_query = """
                             INSERT INTO dbo.Assets 
-                                (asset_tag, type, category, model, assigned_user, assigned_email, 
-                                 assigned_phone, location, purchase_date, warranty_expires, status, 
+                                (asset_tag, type, category, model, serial, assigned_user, assigned_email, 
+                                 assigned_phone, location, purchase_date, warranty_expiration, status, 
                                  created_at, updated_at)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, GETDATE(), GETDATE())
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, GETDATE(), GETDATE())
                         """
                         
                         try:
@@ -3763,9 +3765,9 @@ def main():
                             cursor = conn.cursor()
                             cursor.execute(
                                 insert_query,
-                                asset_tag, asset_type, category, make_model, assigned_user, 
+                                asset_tag, asset_type, category, make_model, serial, assigned_user, 
                                 assigned_email, assigned_phone, location, purchase_date, 
-                                warranty_expires, status
+                                warranty_expiration, status
                             )
                             conn.commit()
                             cursor.close()
