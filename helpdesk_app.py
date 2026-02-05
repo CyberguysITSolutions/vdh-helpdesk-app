@@ -3912,6 +3912,150 @@ def main():
                                 </div>
                                 """, unsafe_allow_html=True)
             
+
+            # EDIT ASSET FORM
+            elif st.session_state.edit_asset_id:
+                st.markdown("---")
+                col1, col2, col3 = st.columns([1, 4, 1])
+                with col1:
+                    if st.button("← Back"):
+                        st.session_state.edit_asset_id = None
+                        st.rerun()
+                
+                # Fetch asset data
+                edit_query = f"SELECT * FROM dbo.Assets WHERE asset_id = {st.session_state.edit_asset_id}"
+                asset_df, edit_err = execute_query(edit_query)
+                
+                if edit_err or asset_df is None or len(asset_df) == 0:
+                    st.error("Asset not found")
+                    st.session_state.edit_asset_id = None
+                else:
+                    asset = asset_df.iloc[0]
+                    st.subheader(f"✏️ Edit Asset: {asset.get('asset_tag', 'N/A')}")
+                    
+                    with st.form("edit_asset_form"):
+                        st.markdown("### Asset Information")
+                        
+                        col1, col2 = st.columns(2)
+                        
+                        with col1:
+                            asset_tag = st.text_input("Asset Tag *", value=asset.get('asset_tag', ''))
+                            
+                            asset_type_options = ["", "Laptop", "Desktop", "Tablet", "Phone", "Monitor", 
+                                "Printer", "Scanner", "Router", "Switch", "Server", "Other"]
+                            current_type = asset.get('type', '')
+                            type_index = asset_type_options.index(current_type) if current_type in asset_type_options else 0
+                            asset_type = st.selectbox("Type *", asset_type_options, index=type_index)
+                            
+                            category_options = ["", "Computer", "Peripheral", "Network", "Furniture", "Software", "Other"]
+                            current_category = asset.get('category', '')
+                            category_index = category_options.index(current_category) if current_category in category_options else 0
+                            category = st.selectbox("Category *", category_options, index=category_index)
+                            
+                            make_model = st.text_input("Make/Model", value=asset.get('model', '') or '')
+                            
+                            serial = st.text_input("Serial Number", value=asset.get('serial', '') or '')
+                            
+                            current_location = asset.get('location', '')
+                            location_index = STANDARD_LOCATIONS.index(current_location) if current_location in STANDARD_LOCATIONS else 0
+                            location = st.selectbox("Location *", STANDARD_LOCATIONS, index=location_index)
+                        
+                        with col2:
+                            # Handle date fields
+                            purchase_date = asset.get('purchase_date')
+                            if purchase_date and not pd.isna(purchase_date):
+                                purchase_date = pd.to_datetime(purchase_date).date()
+                            else:
+                                purchase_date = None
+                            purchase_date = st.date_input("Purchase Date", value=purchase_date)
+                            
+                            warranty_expiration = asset.get('warranty_expiration')
+                            if warranty_expiration and not pd.isna(warranty_expiration):
+                                warranty_expiration = pd.to_datetime(warranty_expiration).date()
+                            else:
+                                warranty_expiration = None
+                            warranty_expiration = st.date_input("Warranty Expires", value=warranty_expiration)
+                            
+                            status_options = ["In-Stock", "Deployed", "Surplus", "Unaccounted"]
+                            current_status = asset.get('status', 'In-Stock')
+                            status_index = status_options.index(current_status) if current_status in status_options else 0
+                            status = st.selectbox("Status *", status_options, index=status_index)
+                        
+                        st.markdown("### Assigned To (Optional)")
+                        
+                        col1, col2 = st.columns(2)
+                        
+                        # Parse current assigned_user (if it exists)
+                        current_assigned = asset.get('assigned_user', '') or ''
+                        name_parts = current_assigned.split(' ', 1) if current_assigned else ['', '']
+                        current_first = name_parts[0] if len(name_parts) > 0 else ''
+                        current_last = name_parts[1] if len(name_parts) > 1 else ''
+                        
+                        with col1:
+                            assigned_first_name = st.text_input("First Name", value=current_first, key="edit_asset_first")
+                            assigned_last_name = st.text_input("Last Name", value=current_last, key="edit_asset_last")
+                        
+                        with col2:
+                            assigned_email = st.text_input("Email", value=asset.get('assigned_email', '') or '', key="edit_asset_email")
+                            assigned_phone = st.text_input("Phone", value=asset.get('assigned_phone', '') or '', key="edit_asset_phone")
+                        
+                        st.markdown("---")
+                        
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            submit_btn = st.form_submit_button("✅ Save Changes", type="primary", use_container_width=True)
+                        with col2:
+                            cancel_btn = st.form_submit_button("❌ Cancel", use_container_width=True)
+                        
+                        if cancel_btn:
+                            st.session_state.edit_asset_id = None
+                            st.rerun()
+                        
+                        if submit_btn:
+                            # Validation
+                            if not asset_tag or not asset_type or not category or not location or not status:
+                                st.error("❌ Please fill in all required fields (marked with *)")
+                            else:
+                                # Build assigned_user string
+                                assigned_user = ""
+                                if assigned_first_name or assigned_last_name:
+                                    assigned_user = f"{assigned_first_name} {assigned_last_name}".strip()
+                                
+                                # Update database
+                                update_query = """
+                                    UPDATE dbo.Assets 
+                                    SET asset_tag = ?, type = ?, category = ?, model = ?, serial = ?,
+                                        assigned_user = ?, assigned_email = ?, assigned_phone = ?,
+                                        location = ?, purchase_date = ?, warranty_expiration = ?,
+                                        status = ?, updated_at = GETDATE()
+                                    WHERE asset_id = ?
+                                """
+                                
+                                try:
+                                    conn = get_db_connection()
+                                    cursor = conn.cursor()
+                                    cursor.execute(
+                                        update_query,
+                                        asset_tag, asset_type, category, make_model, serial,
+                                        assigned_user, assigned_email, assigned_phone,
+                                        location, purchase_date, warranty_expiration,
+                                        status, st.session_state.edit_asset_id
+                                    )
+                                    conn.commit()
+                                    cursor.close()
+                                    conn.close()
+                                    
+                                    st.success(f"✅ Asset '{asset_tag}' updated successfully!")
+                                    
+                                    import time
+                                    time.sleep(1.5)
+                                    
+                                    st.session_state.edit_asset_id = None
+                                    st.rerun()
+                                    
+                                except Exception as e:
+                                    st.error(f"❌ Error updating asset: {str(e)}")
+            
             # GALLERY LIST VIEW
             else:
                 query = """
