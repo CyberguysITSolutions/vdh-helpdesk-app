@@ -1,0 +1,13 @@
+__pycache__
+.git
+output.tar.gz
+file_list.txt
+file_structure.txt
+.venv
+.venv311
+antenv
+antenv.bak*
+*.log
+.env
+.vscode
+*.pyc
