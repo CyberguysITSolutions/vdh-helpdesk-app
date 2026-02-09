@@ -443,7 +443,7 @@ def render_helpdesk_ticket_public_form():
     
     # Custom sidebar for public forms
     with st.sidebar:
-        st.title("🏥 VDH Service Center")
+        st.title("🏥 Crater Service Center")
         st.markdown("---")
         st.markdown("### 🔗 Quick Links")
         st.markdown("[🔐 Login to Service Desk](http://localhost:8501)")
@@ -558,7 +558,7 @@ def render_request_vehicle_public_form():
     
     # Custom sidebar for public forms
     with st.sidebar:
-        st.title("🏥 VDH Service Center")
+        st.title("🏥 Crater Service Center")
         st.markdown("---")
         st.markdown("### 🔗 Quick Links")
         st.markdown("[🔐 Login to Service Desk](http://localhost:8501)")
@@ -854,7 +854,7 @@ def render_procurement_request_public_form():
     
     # Custom sidebar for public forms
     with st.sidebar:
-        st.title("🏥 VDH Service Center")
+        st.title("🏥 Crater Service Center")
         st.markdown("---")
         st.markdown("### 🔗 Quick Links")
         st.markdown("[🔐 Login to Service Desk](http://localhost:8501)")
@@ -924,7 +924,7 @@ def render_driver_trip_entry_public_form():
     
     # Custom sidebar for public forms
     with st.sidebar:
-        st.title("🏥 VDH Service Center")
+        st.title("🏥 Crater Service Center")
         st.markdown("---")
         st.markdown("### 🔗 Quick Links")
         st.markdown("[🔐 Login to Service Desk](http://localhost:8501)")
@@ -1302,8 +1302,8 @@ def get_inventory_by_location(location_id):
 
 def render_login_page():
     """Simple login page to wake up database"""
-    st.title("🏥 VDH Service Center")
-    st.markdown("### Welcome to the VDH Helpdesk System")
+    st.markdown("<h1 style='text-align: center;'>🏥 Crater Service Center</h1>", unsafe_allow_html=True)
+    st.markdown("<h3 style='text-align: center;'>Welcome to VDH Crater Service Center</h3>", unsafe_allow_html=True)
     st.markdown("---")
     
     # Try to connect to database to wake it up
@@ -2724,7 +2724,7 @@ def render_resource_management():
     # Define page options
 
 def main():
-    st.set_page_config(page_title="VDH Service Center", page_icon="🏥", layout="wide")
+    st.set_page_config(page_title="Crater Service Center", page_icon="🏥", layout="wide")
 
     # Check authentication
     if "authenticated" not in st.session_state or not st.session_state.authenticated:
@@ -2794,24 +2794,34 @@ def main():
     except Exception:
         st.caption("UI tweak script not applied.")
 
-    placeholder_text = quote("VDH")
-    logo_url = f"https://via.placeholder.com/200x80/002855/FFFFFF.png?text={placeholder_text}"
+    # Try to load actual logo file first, then fallback to placeholder
+    logo_loaded = False
     try:
-        st.sidebar.image(logo_url, width=200)
+        st.sidebar.image("VDH-logo.png", width=200)
+        logo_loaded = True
     except Exception:
+        # Fallback to placeholder
+        placeholder_text = quote("Crater SC")
+        logo_url = f"https://via.placeholder.com/200x80/002855/FFFFFF.png?text={placeholder_text}"
         try:
-            safe_st_image(logo_url, width=200)
+            st.sidebar.image(logo_url, width=200)
+            logo_loaded = True
         except Exception:
-            svg = """
-            <svg width="200" height="80" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="VDH">
-              <rect width="200" height="80" fill="#002855" rx="6" ry="6"/>
-              <text x="100" y="50" font-family="Arial, Helvetica, sans-serif" font-size="16" fill="#FFFFFF" text-anchor="middle">VDH Service Center</text>
-            </svg>
-            """
-            b64 = base64.b64encode(svg.encode("utf-8")).decode("utf-8")
-            st.sidebar.markdown(f'<img src="data:image/svg+xml;base64,{b64}" width="200" alt="VDH logo">', unsafe_allow_html=True)
+            try:
+                safe_st_image(logo_url, width=200)
+                logo_loaded = True
+            except Exception:
+                # Final fallback to SVG
+                svg = """
+                <svg width="200" height="80" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Crater SC">
+                  <rect width="200" height="80" fill="#002855" rx="6" ry="6"/>
+                  <text x="100" y="50" font-family="Arial, Helvetica, sans-serif" font-size="14" fill="#FFFFFF" text-anchor="middle">Crater Service Center</text>
+                </svg>
+                """
+                b64 = base64.b64encode(svg.encode("utf-8")).decode("utf-8")
+                st.sidebar.markdown(f'<img src="data:image/svg+xml;base64,{b64}" width="200" alt="Crater SC logo">', unsafe_allow_html=True)
 
-    st.sidebar.title("VDH Service Center")
+    st.sidebar.title("Crater Service Center")
 
     # User profile section
     username = st.session_state.get("username", "User")
@@ -3614,7 +3624,7 @@ def main():
                             row_class = "item-row-even" if idx % 2 == 0 else "item-row-odd"
                             st.markdown(f'<div class="item-row {row_class}">', unsafe_allow_html=True)
                             
-                            col1, col2, col3, col4 = st.columns([3, 2, 1, 1])
+                            col1, col2, col3, col4, col5 = st.columns([3, 2, 1, 1, 1])
                             
                             with col1:
                                 ticket_id = ticket.get('ticket_id', 'N/A')
@@ -3651,7 +3661,47 @@ def main():
                                     st.session_state.view_ticket_id = ticket_id
                                     st.rerun()
                             
+                            with col5:
+                                if st.button("🗑️", key=f"del_ticket_{idx}_{ticket_id}", help="Delete ticket"):
+                                    st.session_state.delete_ticket_id = ticket_id
+                                    st.session_state.show_delete_ticket_confirm = True
+                                    st.rerun()
+                            
                             st.markdown('</div>', unsafe_allow_html=True)
+                        
+                        # Delete confirmation dialog
+                        if st.session_state.get('show_delete_ticket_confirm', False):
+                            st.markdown("---")
+                            st.warning(f"⚠️ **Are you sure you want to delete Ticket #{st.session_state.get('delete_ticket_id')}?**")
+                            st.write("This action cannot be undone!")
+                            
+                            col1, col2, col3 = st.columns([1, 1, 3])
+                            with col1:
+                                if st.button("✅ Yes, Delete", type="primary", key="confirm_delete_ticket"):
+                                    try:
+                                        delete_query = f"DELETE FROM dbo.Tickets WHERE ticket_id = {st.session_state.delete_ticket_id}"
+                                        conn = get_db_connection()
+                                        cursor = conn.cursor()
+                                        cursor.execute(delete_query)
+                                        conn.commit()
+                                        cursor.close()
+                                        conn.close()
+                                        
+                                        st.success(f"✅ Ticket #{st.session_state.delete_ticket_id} deleted successfully!")
+                                        st.session_state.show_delete_ticket_confirm = False
+                                        st.session_state.delete_ticket_id = None
+                                        
+                                        import time
+                                        time.sleep(1.5)
+                                        st.rerun()
+                                    except Exception as e:
+                                        st.error(f"❌ Error deleting ticket: {str(e)}")
+                            
+                            with col2:
+                                if st.button("❌ Cancel", key="cancel_delete_ticket"):
+                                    st.session_state.show_delete_ticket_confirm = False
+                                    st.session_state.delete_ticket_id = None
+                                    st.rerun()
                         
                         st.markdown("---")
                         st.download_button(
@@ -4152,7 +4202,47 @@ def main():
                                     st.session_state.view_asset_id = asset_id
                                     st.rerun()
                             
+                            with col5:
+                                if st.button("🗑️", key=f"del_asset_{idx}_{asset_id}", help="Delete asset"):
+                                    st.session_state.delete_asset_id = asset_id
+                                    st.session_state.show_delete_asset_confirm = True
+                                    st.rerun()
+                            
                             st.markdown('</div>', unsafe_allow_html=True)
+                        
+                        # Delete confirmation dialog
+                        if st.session_state.get('show_delete_asset_confirm', False):
+                            st.markdown("---")
+                            st.warning(f"⚠️ **Are you sure you want to delete Asset #{st.session_state.get('delete_asset_id')}?**")
+                            st.write("This action cannot be undone!")
+                            
+                            col1, col2, col3 = st.columns([1, 1, 3])
+                            with col1:
+                                if st.button("✅ Yes, Delete", type="primary", key="confirm_delete_asset"):
+                                    try:
+                                        delete_query = f"DELETE FROM dbo.Assets WHERE asset_id = {st.session_state.delete_asset_id}"
+                                        conn = get_db_connection()
+                                        cursor = conn.cursor()
+                                        cursor.execute(delete_query)
+                                        conn.commit()
+                                        cursor.close()
+                                        conn.close()
+                                        
+                                        st.success(f"✅ Asset #{st.session_state.delete_asset_id} deleted successfully!")
+                                        st.session_state.show_delete_asset_confirm = False
+                                        st.session_state.delete_asset_id = None
+                                        
+                                        import time
+                                        time.sleep(1.5)
+                                        st.rerun()
+                                    except Exception as e:
+                                        st.error(f"❌ Error deleting asset: {str(e)}")
+                            
+                            with col2:
+                                if st.button("❌ Cancel", key="cancel_delete_asset"):
+                                    st.session_state.show_delete_asset_confirm = False
+                                    st.session_state.delete_asset_id = None
+                                    st.rerun()
                         
                         st.markdown("---")
                         st.download_button(
@@ -4538,7 +4628,7 @@ def main():
                             row_class = "item-row-even" if idx % 2 == 0 else "item-row-odd"
                             st.markdown(f'<div class="item-row {row_class}">', unsafe_allow_html=True)
                             
-                            col1, col2, col3, col4 = st.columns([3, 2, 1, 1])
+                            col1, col2, col3, col4, col5 = st.columns([3, 2, 1, 1, 1])
                             
                             with col1:
                                 request_num = procurement.get('request_number', 'N/A')
@@ -5915,7 +6005,7 @@ def main():
         # Redirect to Resource Management if someone tries to access this
         st.session_state.page = "📦 Resource Management"
         st.session_state.resource_view = 'distribution'
-    st.markdown("*VDH Service Center - Comprehensive Management System | Virginia Department of Health © 2025*")
+    st.markdown("*Crater Service Center - Comprehensive Management System | Virginia Department of Health © 2025*")
 
 # Run
 if __name__ == "__main__":
