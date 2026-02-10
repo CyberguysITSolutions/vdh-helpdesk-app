@@ -2989,15 +2989,15 @@ def main():
     if page == "📊 Dashboard":
         st.header("📊 Dashboard Overview")
         with st.spinner("Loading dashboard data..."):
-            stats_df, stats_err = execute_query("SELECT COUNT(*) as total_tickets FROM dbo.Tickets")
-            status_df, status_err = execute_query("SELECT status, COUNT(*) as count FROM dbo.Tickets GROUP BY status")
-            priority_df, pr_err = execute_query("SELECT priority, COUNT(*) as count FROM dbo.Tickets GROUP BY priority")
-            location_df, loc_err = execute_query("SELECT location, COUNT(*) as count FROM dbo.Tickets GROUP BY location")
+            stats_df, stats_err = execute_query("SELECT COUNT(*) as total_tickets FROM dbo.Tickets WHERE (is_deleted = 0 OR is_deleted IS NULL)")
+            status_df, status_err = execute_query("SELECT status, COUNT(*) as count FROM dbo.Tickets WHERE (is_deleted = 0 OR is_deleted IS NULL) GROUP BY status")
+            priority_df, pr_err = execute_query("SELECT priority, COUNT(*) as count FROM dbo.Tickets WHERE (is_deleted = 0 OR is_deleted IS NULL) GROUP BY priority")
+            location_df, loc_err = execute_query("SELECT location, COUNT(*) as count FROM dbo.Tickets WHERE (is_deleted = 0 OR is_deleted IS NULL) GROUP BY location")
 
-            asset_df, asset_err = execute_query("SELECT COUNT(*) as total_assets FROM dbo.Assets")
-            asset_status_df, asset_status_err = execute_query("SELECT status, COUNT(*) as count FROM dbo.Assets GROUP BY status")
-            asset_location_df, asset_location_err = execute_query("SELECT location, COUNT(*) as count FROM dbo.Assets GROUP BY location")
-            asset_type_df, asset_type_err = execute_query("SELECT type, COUNT(*) as count FROM dbo.Assets GROUP BY type")
+            asset_df, asset_err = execute_query("SELECT COUNT(*) as total_assets FROM dbo.Assets WHERE (is_deleted = 0 OR is_deleted IS NULL)")
+            asset_status_df, asset_status_err = execute_query("SELECT status, COUNT(*) as count FROM dbo.Assets WHERE (is_deleted = 0 OR is_deleted IS NULL) GROUP BY status")
+            asset_location_df, asset_location_err = execute_query("SELECT location, COUNT(*) as count FROM dbo.Assets WHERE (is_deleted = 0 OR is_deleted IS NULL) GROUP BY location")
+            asset_type_df, asset_type_err = execute_query("SELECT type, COUNT(*) as count FROM dbo.Assets WHERE (is_deleted = 0 OR is_deleted IS NULL) GROUP BY type")
 
             proc_df, proc_err = execute_query("SELECT COUNT(*) as total_requests FROM dbo.Procurement_Requests")
             fleet_df, fleet_err = execute_query("SELECT COUNT(*) as total_vehicles FROM dbo.vehicles")
@@ -3540,6 +3540,7 @@ def main():
                         customer_email, requester_email, email,
                         customer_phone, requester_phone, phone_number
                     FROM dbo.Tickets 
+                    WHERE (is_deleted = 0 OR is_deleted IS NULL)
                     ORDER BY created_at DESC
                 """
                 df, err = execute_query(query)
@@ -3679,7 +3680,15 @@ def main():
                             with col1:
                                 if st.button("✅ Yes, Delete", type="primary", key="confirm_delete_ticket"):
                                     try:
-                                        delete_query = f"DELETE FROM dbo.Tickets WHERE ticket_id = {st.session_state.delete_ticket_id}"
+                                        # Soft delete - mark as deleted instead of removing from database
+                                        current_user = st.session_state.get('username', 'system')
+                                        delete_query = f"""
+                                            UPDATE dbo.Tickets 
+                                            SET is_deleted = 1, 
+                                                deleted_at = GETDATE(), 
+                                                deleted_by = '{current_user}' 
+                                            WHERE ticket_id = {st.session_state.delete_ticket_id}
+                                        """
                                         conn = get_db_connection()
                                         cursor = conn.cursor()
                                         cursor.execute(delete_query)
@@ -4113,6 +4122,7 @@ def main():
                         asset_id, asset_tag, type, category, model, serial, 
                         status, location, assigned_user, assigned_email
                     FROM dbo.Assets 
+                    WHERE (is_deleted = 0 OR is_deleted IS NULL)
                     ORDER BY asset_id DESC
                 """
                 df, err = execute_query(query)
@@ -4171,7 +4181,7 @@ def main():
                             row_class = "item-row-even" if idx % 2 == 0 else "item-row-odd"
                             st.markdown(f'<div class="item-row {row_class}">', unsafe_allow_html=True)
                             
-                            col1, col2, col3, col4 = st.columns([3, 2, 2, 1])
+                            col1, col2, col3, col4, col5 = st.columns([3, 2, 2, 1, 1])
                             
                             with col1:
                                 asset_id = asset.get('asset_id', 'N/A')
@@ -4220,7 +4230,15 @@ def main():
                             with col1:
                                 if st.button("✅ Yes, Delete", type="primary", key="confirm_delete_asset"):
                                     try:
-                                        delete_query = f"DELETE FROM dbo.Assets WHERE asset_id = {st.session_state.delete_asset_id}"
+                                        # Soft delete - mark as deleted instead of removing from database
+                                        current_user = st.session_state.get('username', 'system')
+                                        delete_query = f"""
+                                            UPDATE dbo.Assets 
+                                            SET is_deleted = 1, 
+                                                deleted_at = GETDATE(), 
+                                                deleted_by = '{current_user}' 
+                                            WHERE asset_id = {st.session_state.delete_asset_id}
+                                        """
                                         conn = get_db_connection()
                                         cursor = conn.cursor()
                                         cursor.execute(delete_query)
