@@ -525,46 +525,46 @@ def render_helpdesk_ticket_public_form():
                     )
                     if not success:
                         logger.warning(f"Failed to save ticket to database: {error}")
-            
-            if attachments:
-                adir = _ensure_submissions_dir() / submission_id
-                adir.mkdir(parents=True, exist_ok=True)
-                for f in attachments:
-                    contents = f.read()
-                    with open(adir / f.name, "wb") as fh:
-                        fh.write(contents)
-            st.success(f"✅ **Your ticket has been submitted successfully!**")
-            st.balloons()
-            
-            # Show success page
-            st.markdown("---")
-            st.info("📧 **Your ticket was received and will be resolved in the order it was received.**")
-            
-            st.markdown("---")
-            st.write("### 📋 Ticket Details")
-            st.write(f"**Ticket ID:** {submission_id}")
-            st.write(f"**Subject:** {subject}")
-            st.write(f"**Priority:** {priority}")
-            st.write(f"**Status:** New")
-            
-            st.markdown("---")
-            st.write("### What happens next?")
-            st.write("1. 📝 Your ticket has been logged in our system")
-            st.write("2. 👀 An administrator will review it shortly")
-            st.write("3. 📧 You'll receive email updates on the ticket status")
-            st.write("4. 🔧 We'll work to resolve your issue as quickly as possible")
-            
-            st.markdown("---")
-            try:
-                support_email = st.secrets.get('support_email', 'support@vdh.virginia.gov')
-            except:
-                support_email = 'support@vdh.virginia.gov'
-            st.caption(f"Need immediate assistance? Contact support at {support_email}")
-            
-            st.stop()  # Prevent redirect to main app
-        except Exception as e:
-            st.error("Sorry, we could not save your submission. Please try again or contact support.")
-            st.exception(e)
+                
+                if attachments:
+                    adir = _ensure_submissions_dir() / submission_id
+                    adir.mkdir(parents=True, exist_ok=True)
+                    for f in attachments:
+                        contents = f.read()
+                        with open(adir / f.name, "wb") as fh:
+                            fh.write(contents)
+                st.success(f"✅ **Your ticket has been submitted successfully!**")
+                st.balloons()
+                
+                # Show success page
+                st.markdown("---")
+                st.info("📧 **Your ticket was received and will be resolved in the order it was received.**")
+                
+                st.markdown("---")
+                st.write("### 📋 Ticket Details")
+                st.write(f"**Ticket ID:** {submission_id}")
+                st.write(f"**Subject:** {subject}")
+                st.write(f"**Priority:** {priority}")
+                st.write(f"**Status:** New")
+                
+                st.markdown("---")
+                st.write("### What happens next?")
+                st.write("1. 📝 Your ticket has been logged in our system")
+                st.write("2. 👀 An administrator will review it shortly")
+                st.write("3. 📧 You'll receive email updates on the ticket status")
+                st.write("4. 🔧 We'll work to resolve your issue as quickly as possible")
+                
+                st.markdown("---")
+                try:
+                    support_email = st.secrets.get('support_email', 'support@vdh.virginia.gov')
+                except:
+                    support_email = 'support@vdh.virginia.gov'
+                st.caption(f"Need immediate assistance? Contact support at {support_email}")
+                
+                st.stop()  # Prevent redirect to main app
+            except Exception as e:
+                st.error("Sorry, we could not save your submission. Please try again or contact support.")
+                st.exception(e)
 
 def render_request_vehicle_public_form():
     # Hide default Streamlit navigation
