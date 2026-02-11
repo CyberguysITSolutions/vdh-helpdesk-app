@@ -464,48 +464,67 @@ def render_helpdesk_ticket_public_form():
     st.title("Submit Helpdesk Ticket")
     st.markdown("Use this form to submit a public helpdesk ticket. Provide contact info and a description of your issue.")
     with st.form("public_helpdesk_form", clear_on_submit=False):
-        name = st.text_input("Full name", "")
-        email = st.text_input("Email", "")
+        name = st.text_input("Full name *", "")
+        email = st.text_input("Email *", "")
         phone = st.text_input("Phone (optional)", "")
+        
+        # Add location dropdown
+        location = st.selectbox("Location *", [
+            "",  # Empty default to force selection
+            "Petersburg Health Department",
+            "Dinwiddie County Health Department",
+            "Sussex County Health Department",
+            "Surry County Health Department",
+            "Prince George Health Department",
+            "Hopewell Health Department",
+            "Greensville/Emporia Health Department",
+            "Other/Not Listed"
+        ])
+        
         department = st.text_input("Department (optional)", "")
-        subject = st.text_input("Subject", "")
+        subject = st.text_input("Subject *", "")
         priority = st.selectbox("Priority", ["Low", "Medium", "High"], index=1)
-        description = st.text_area("Description", height=200)
+        description = st.text_area("Description *", height=200)
         attachments = st.file_uploader("Attachments (optional)", accept_multiple_files=True)
         submitted = st.form_submit_button("Submit Ticket")
     if submitted:
-        now = datetime.utcnow().isoformat() + "Z"
-        submission_id = datetime.utcnow().strftime("%Y%m%d%H%M%S%f")
-        attachment_names = ";".join([f.name for f in attachments]) if attachments else ""
-        row = {
-            "submission_id": submission_id,
-            "timestamp_utc": now,
-            "name": name,
-            "email": email,
-            "phone": phone,
-            "department": department,
-            "subject": subject,
-            "priority": priority,
-            "description": description,
-            "attachments": attachment_names,
-        }
-        try:
-            _append_submission_csv("helpdesk_tickets", row)
-            
-            # Also save to database for tracking and badges
-            if check_db_available():
-                ticket_insert = """
-                    INSERT INTO dbo.Tickets 
-                        (requester_name, requester_email, requester_phone, department, 
-                         subject, priority, description, status, created_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, 'New', GETDATE())
-                """
-                success, error = execute_non_query(
-                    ticket_insert, 
-                    (name, email, phone, department, subject, priority, description)
-                )
-                if not success:
-                    logger.warning(f"Failed to save ticket to database: {error}")
+        # Validation
+        if not name or not email or not subject or not description or not location:
+            st.error("❌ Please fill in all required fields (marked with *)")
+        else:
+            now = datetime.utcnow().isoformat() + "Z"
+            submission_id = datetime.utcnow().strftime("%Y%m%d%H%M%S%f")
+            attachment_names = ";".join([f.name for f in attachments]) if attachments else ""
+            row = {
+                "submission_id": submission_id,
+                "timestamp_utc": now,
+                "name": name,
+                "email": email,
+                "phone": phone,
+                "location": location,
+                "department": department,
+                "subject": subject,
+                "priority": priority,
+                "description": description,
+                "attachments": attachment_names,
+            }
+            try:
+                _append_submission_csv("helpdesk_tickets", row)
+                
+                # Also save to database for tracking and badges
+                if check_db_available():
+                    ticket_insert = """
+                        INSERT INTO dbo.Tickets 
+                            (requester_name, requester_email, requester_phone, location, department, 
+                             subject, priority, description, status, created_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'New', GETDATE())
+                    """
+                    success, error = execute_non_query(
+                        ticket_insert, 
+                        (name, email, phone, location, department, subject, priority, description)
+                    )
+                    if not success:
+                        logger.warning(f"Failed to save ticket to database: {error}")
             
             if attachments:
                 adir = _ensure_submissions_dir() / submission_id
@@ -3625,7 +3644,7 @@ def main():
                             row_class = "item-row-even" if idx % 2 == 0 else "item-row-odd"
                             st.markdown(f'<div class="item-row {row_class}">', unsafe_allow_html=True)
                             
-                            col1, col2, col3, col4, col5 = st.columns([3, 2, 1, 1, 1])
+                            col1, col2, col3, col4, col5 = st.columns([3, 2, 1.5, 1, 1])
                             
                             with col1:
                                 ticket_id = ticket.get('ticket_id', 'N/A')
@@ -3648,14 +3667,93 @@ def main():
                             
                             with col2:
                                 status = ticket.get('status', 'N/A')
-                                st.write(f"**Status:** {status}")
+                                
+                                # Quick edit button for status
+                                quick_edit_key = f"quick_edit_status_{idx}_{ticket_id}"
+                                if st.session_state.get(quick_edit_key, False):
+                                    # Show dropdown when editing
+                                    new_status = st.selectbox(
+                                        "Status",
+                                        ["New", "In Progress", "On Hold", "Resolved", "Closed"],
+                                        index=["New", "In Progress", "On Hold", "Resolved", "Closed"].index(status) if status in ["New", "In Progress", "On Hold", "Resolved", "Closed"] else 0,
+                                        key=f"status_select_{idx}_{ticket_id}"
+                                    )
+                                    col_a, col_b = st.columns(2)
+                                    with col_a:
+                                        if st.button("✅", key=f"save_status_{idx}_{ticket_id}", help="Save"):
+                                            # Update database
+                                            try:
+                                                update_query = f"UPDATE dbo.Tickets SET status = '{new_status}' WHERE ticket_id = {ticket_id}"
+                                                conn = get_db_connection()
+                                                cursor = conn.cursor()
+                                                cursor.execute(update_query)
+                                                conn.commit()
+                                                cursor.close()
+                                                conn.close()
+                                                st.session_state[quick_edit_key] = False
+                                                st.rerun()
+                                            except Exception as e:
+                                                st.error(f"Error: {str(e)}")
+                                    with col_b:
+                                        if st.button("❌", key=f"cancel_status_{idx}_{ticket_id}", help="Cancel"):
+                                            st.session_state[quick_edit_key] = False
+                                            st.rerun()
+                                else:
+                                    # Show status with edit button
+                                    col_a, col_b = st.columns([3, 1])
+                                    with col_a:
+                                        st.write(f"**Status:** {status}")
+                                    with col_b:
+                                        if st.button("✏️", key=f"edit_status_{idx}_{ticket_id}", help="Quick edit status"):
+                                            st.session_state[quick_edit_key] = True
+                                            st.rerun()
+                                
                                 created = ticket.get('created_at', 'N/A')
                                 st.caption(f"Created: {created}")
                             
                             with col3:
                                 priority = ticket.get('priority', 'Normal')
                                 priority_colors = {'Low': '🟢', 'Medium': '🟡', 'High': '🟠', 'Critical': '🔴'}
-                                st.write(f"{priority_colors.get(priority, '⚪')} {priority}")
+                                
+                                # Quick edit button for priority
+                                quick_edit_priority_key = f"quick_edit_priority_{idx}_{ticket_id}"
+                                if st.session_state.get(quick_edit_priority_key, False):
+                                    # Show dropdown when editing
+                                    new_priority = st.selectbox(
+                                        "Priority",
+                                        ["Low", "Medium", "High", "Critical"],
+                                        index=["Low", "Medium", "High", "Critical"].index(priority) if priority in ["Low", "Medium", "High", "Critical"] else 1,
+                                        key=f"priority_select_{idx}_{ticket_id}"
+                                    )
+                                    col_a, col_b = st.columns(2)
+                                    with col_a:
+                                        if st.button("✅", key=f"save_priority_{idx}_{ticket_id}", help="Save"):
+                                            # Update database
+                                            try:
+                                                update_query = f"UPDATE dbo.Tickets SET priority = '{new_priority}' WHERE ticket_id = {ticket_id}"
+                                                conn = get_db_connection()
+                                                cursor = conn.cursor()
+                                                cursor.execute(update_query)
+                                                conn.commit()
+                                                cursor.close()
+                                                conn.close()
+                                                st.session_state[quick_edit_priority_key] = False
+                                                st.rerun()
+                                            except Exception as e:
+                                                st.error(f"Error: {str(e)}")
+                                    with col_b:
+                                        if st.button("❌", key=f"cancel_priority_{idx}_{ticket_id}", help="Cancel"):
+                                            st.session_state[quick_edit_priority_key] = False
+                                            st.rerun()
+                                else:
+                                    # Show priority with edit button
+                                    col_a, col_b = st.columns([3, 1])
+                                    with col_a:
+                                        st.write(f"{priority_colors.get(priority, '⚪')} {priority}")
+                                    with col_b:
+                                        if st.button("✏️", key=f"edit_priority_{idx}_{ticket_id}", help="Quick edit priority"):
+                                            st.session_state[quick_edit_priority_key] = True
+                                            st.rerun()
                             
                             with col4:
                                 if st.button("📋 View", key=f"view_ticket_{idx}_{ticket_id}"):
@@ -3742,6 +3840,21 @@ def main():
             st.markdown("---")
             st.info("⚡ Add New Asset")
             
+            # Get existing makes/models for autocomplete
+            existing_models_query = """
+                SELECT DISTINCT model 
+                FROM dbo.Assets 
+                WHERE model IS NOT NULL 
+                  AND model != '' 
+                  AND (is_deleted = 0 OR is_deleted IS NULL)
+                ORDER BY model
+            """
+            models_df, models_err = execute_query(existing_models_query)
+            
+            existing_models = []
+            if models_df is not None and not models_df.empty:
+                existing_models = models_df['model'].tolist()
+            
             with st.form("add_asset_form", clear_on_submit=False):
                 st.markdown("### Asset Information")
                 
@@ -3760,7 +3873,33 @@ def main():
                         "Software", "Other"
                     ])
                     
-                    make_model = st.text_input("Make/Model", placeholder="e.g., Dell Latitude 5520")
+                    # Make/Model with autocomplete using selectbox
+                    if existing_models:
+                        st.markdown("**Make/Model** *(Select from existing or type new below)*")
+                        make_model_select = st.selectbox(
+                            "Select existing model",
+                            ["-- Type New Model Below --"] + existing_models,
+                            key="model_select"
+                        )
+                        
+                        # If user selects an existing model, use it; otherwise show text input
+                        if make_model_select == "-- Type New Model Below --":
+                            make_model = st.text_input(
+                                "Or enter new Make/Model", 
+                                placeholder="e.g., Dell Latitude 5520",
+                                key="model_input"
+                            )
+                        else:
+                            make_model = make_model_select
+                            st.text_input(
+                                "Or enter new Make/Model", 
+                                value=make_model,
+                                placeholder="e.g., Dell Latitude 5520",
+                                key="model_input_filled",
+                                disabled=True
+                            )
+                    else:
+                        make_model = st.text_input("Make/Model", placeholder="e.g., Dell Latitude 5520")
                     
                     serial = st.text_input("Serial Number", placeholder="e.g., 654321abc")
                     
