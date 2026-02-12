@@ -3668,22 +3668,40 @@ def main():
                             with col2:
                                 status = ticket.get('status', 'N/A')
                                 
+                                # Status mapping: display -> database
+                                status_display_options = {
+                                    'New': 'New',
+                                    'open': 'Open', 
+                                    'in_progress': 'In Progress',
+                                    'on_hold': 'On Hold',
+                                    'waiting_customer_response': 'Waiting Customer Response',
+                                    'resolved': 'Resolved',
+                                    'closed': 'Closed'
+                                }
+                                # Reverse mapping for saving
+                                display_to_db = {v: k for k, v in status_display_options.items()}
+                                
+                                # Get display value from database value
+                                status_display = status_display_options.get(status, status)
+                                
                                 # Quick edit button for status
                                 quick_edit_key = f"quick_edit_status_{idx}_{ticket_id}"
                                 if st.session_state.get(quick_edit_key, False):
                                     # Show dropdown when editing
-                                    new_status = st.selectbox(
+                                    new_status_display = st.selectbox(
                                         "Status",
-                                        ["New", "In Progress", "On Hold", "Resolved", "Closed"],
-                                        index=["New", "In Progress", "On Hold", "Resolved", "Closed"].index(status) if status in ["New", "In Progress", "On Hold", "Resolved", "Closed"] else 0,
+                                        ["New", "Open", "In Progress", "On Hold", "Waiting Customer Response", "Resolved", "Closed"],
+                                        index=["New", "Open", "In Progress", "On Hold", "Waiting Customer Response", "Resolved", "Closed"].index(status_display) if status_display in ["New", "Open", "In Progress", "On Hold", "Waiting Customer Response", "Resolved", "Closed"] else 0,
                                         key=f"status_select_{idx}_{ticket_id}"
                                     )
                                     col_a, col_b = st.columns(2)
                                     with col_a:
                                         if st.button("✅", key=f"save_status_{idx}_{ticket_id}", help="Save"):
+                                            # Convert display value to database value
+                                            new_status_db = display_to_db.get(new_status_display, new_status_display)
                                             # Update database
                                             try:
-                                                update_query = f"UPDATE dbo.Tickets SET status = '{new_status}' WHERE ticket_id = {ticket_id}"
+                                                update_query = f"UPDATE dbo.Tickets SET status = '{new_status_db}' WHERE ticket_id = {ticket_id}"
                                                 conn = get_db_connection()
                                                 cursor = conn.cursor()
                                                 cursor.execute(update_query)
@@ -3702,7 +3720,7 @@ def main():
                                     # Show status with edit button
                                     col_a, col_b = st.columns([3, 1])
                                     with col_a:
-                                        st.write(f"**Status:** {status}")
+                                        st.write(f"**Status:** {status_display}")
                                     with col_b:
                                         if st.button("✏️", key=f"edit_status_{idx}_{ticket_id}", help="Quick edit status"):
                                             st.session_state[quick_edit_key] = True
