@@ -1336,7 +1336,7 @@ def authenticate_user(username, password):
         
         # Query Users table for the username
         query = """
-            SELECT user_id, username, password_hash, first_name, last_name, 
+            SELECT id, username, password_hash, first_name, last_name, 
                    role, email, is_active, entra_id
             FROM dbo.Users
             WHERE username = ? AND is_active = 1
@@ -1484,18 +1484,18 @@ def render_login_page():
                             st.session_state.username = username
                             st.session_state.user_role = user_data.get('role', 'user')
                             st.session_state.user_email = user_data.get('email', '')
-                            st.session_state.user_id = user_data.get('user_id')
+                            st.session_state.user_id = user_data.get('id')  # Using 'id' not 'user_id'
                             
                             # Update last_login in database
                             try:
                                 update_query = """
                                     UPDATE dbo.Users 
                                     SET last_login = GETDATE() 
-                                    WHERE user_id = ?
+                                    WHERE id = ?
                                 """
                                 conn = get_db_connection()
                                 cursor = conn.cursor()
-                                cursor.execute(update_query, (user_data.get('user_id'),))
+                                cursor.execute(update_query, (user_data.get('id'),))
                                 conn.commit()
                                 cursor.close()
                                 conn.close()
