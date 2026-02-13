@@ -1319,6 +1319,85 @@ def get_inventory_by_location(location_id):
 # LOGIN PAGE - Wakes up DB
 # =====================================================
 
+def authenticate_user(username, password):
+    """
+    Authenticate user against Users table.
+    Checks username and password (supports both plain text and hashed).
+    Returns: (success: bool, error_message: str, user_data: dict)
+    """
+    if not username or not password:
+        return False, "Username and password are required", None
+    
+    try:
+        # First check if database is available
+        if not check_db_available():
+            logger.error("Database not available during authentication")
+            return False, "Database unavailable. Please try again in a moment.", None
+        
+        # Query Users table for the username
+        query = """
+            SELECT user_id, username, password_hash, first_name, last_name, 
+                   role, email, is_active, entra_id
+            FROM dbo.Users
+            WHERE username = ? AND is_active = 1
+        """
+        
+        logger.info(f"Authentication attempt for user: {username}")
+        df, err = execute_query(query, (username,))
+        
+        if err:
+            logger.error(f"Database error during authentication: {err}")
+            return False, "Authentication system error. Please contact IT.", None
+        
+        if df is None or df.empty:
+            logger.warning(f"User not found: {username}")
+            return False, "Invalid username or password", None
+        
+        # Get user record
+        user = df.iloc[0].to_dict()
+        stored_hash = str(user.get('password_hash', '')).strip()
+        
+        if not stored_hash:
+            logger.error(f"No password hash for user: {username}")
+            return False, "Account not properly configured. Contact IT.", None
+        
+        logger.info(f"Found user {username}, verifying password...")
+        
+        # Verify password
+        # Check if using scrypt/pbkdf2 hash (secure) or plain text (temporary)
+        if stored_hash.startswith('scrypt:') or stored_hash.startswith('pbkdf2:'):
+            # Hashed password - secure
+            try:
+                from werkzeug.security import check_password_hash
+                if check_password_hash(stored_hash, password):
+                    logger.info(f"✅ Successful login (hashed): {username}")
+                    return True, "", user
+                else:
+                    logger.warning(f"❌ Invalid password for user: {username}")
+                    return False, "Invalid username or password", None
+            except ImportError:
+                logger.error("werkzeug not installed for password hashing")
+                return False, "Authentication system error. Contact IT.", None
+            except Exception as e:
+                logger.error(f"Password verification error: {str(e)}")
+                return False, "Authentication system error. Contact IT.", None
+        else:
+            # Plain text password (TEMPORARY - for initial testing only)
+            logger.warning(f"⚠️ User {username} using plain text password - SECURITY RISK!")
+            if stored_hash == password:
+                logger.info(f"✅ Successful login (plain text): {username}")
+                return True, "", user
+            else:
+                logger.warning(f"❌ Invalid password for user: {username}")
+                return False, "Invalid username or password", None
+        
+    except Exception as e:
+        logger.error(f"Authentication exception: {str(e)}")
+        import traceback
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        return False, "Authentication system error. Please contact IT.", None
+
+
 def render_login_page():
     """Simple login page to wake up database"""
     st.markdown("<h1 style='text-align: center;'>🏥 Crater Service Center</h1>", unsafe_allow_html=True)
@@ -1341,6 +1420,40 @@ def render_login_page():
     
     st.markdown("---")
     
+    # DEBUG: Show authentication system status
+    with st.expander("🔍 Authentication System Status", expanded=False):
+        try:
+            test_query = "SELECT COUNT(*) as user_count FROM dbo.Users WHERE is_active = 1"
+            test_df, test_err = execute_query(test_query)
+            
+            if test_err:
+                st.error(f"⚠️ Users table not accessible")
+                st.caption(f"Error: {test_err}")
+                st.info("**Action Required:** Run setup_authentication.sql in Azure SQL")
+            elif test_df is not None and not test_df.empty:
+                user_count = test_df.iloc[0]['user_count']
+                if user_count > 0:
+                    st.success(f"✅ Authentication ready - {user_count} active user(s)")
+                    
+                    # Show available test accounts
+                    users_query = "SELECT username, role FROM dbo.Users WHERE is_active = 1 ORDER BY username"
+                    users_df, _ = execute_query(users_query)
+                    if users_df is not None and not users_df.empty:
+                        st.write("**Test Accounts:**")
+                        for idx, user in users_df.iterrows():
+                            st.write(f"• {user['username']} ({user['role']})")
+                else:
+                    st.warning("⚠️ No active users found")
+                    st.info("**Action Required:** Run setup_authentication.sql to create test accounts")
+            else:
+                st.error("⚠️ Users table exists but returned no data")
+        except Exception as e:
+            st.error(f"⚠️ Authentication check failed")
+            st.caption(f"Error: {str(e)}")
+            st.info("**Action Required:** Run setup_authentication.sql in Azure SQL")
+    
+    st.markdown("---")
+    
     # Initialize password reset state
     if "show_password_reset" not in st.session_state:
         st.session_state.show_password_reset = False
@@ -1358,16 +1471,47 @@ def render_login_page():
                 submit = st.form_submit_button("🔐 Sign In", use_container_width=True, type="primary")
                 
                 if submit:
-                    if username and password:
-                        st.session_state.authenticated = True
-                        st.session_state.username = username
-                        st.balloons()
-                        st.success("✅ Login successful! Redirecting...")
-                        import time
-                        time.sleep(1)
-                        st.rerun()
-                    else:
+                    if not username or not password:
                         st.error("⚠️ Please enter both username and password")
+                    else:
+                        # Authenticate user against database
+                        with st.spinner("Authenticating..."):
+                            success, error_msg, user_data = authenticate_user(username, password)
+                        
+                        if success:
+                            # Set session state
+                            st.session_state.authenticated = True
+                            st.session_state.username = username
+                            st.session_state.user_role = user_data.get('role', 'user')
+                            st.session_state.user_email = user_data.get('email', '')
+                            st.session_state.user_id = user_data.get('user_id')
+                            
+                            # Update last_login in database
+                            try:
+                                update_query = """
+                                    UPDATE dbo.Users 
+                                    SET last_login = GETDATE() 
+                                    WHERE user_id = ?
+                                """
+                                conn = get_db_connection()
+                                cursor = conn.cursor()
+                                cursor.execute(update_query, (user_data.get('user_id'),))
+                                conn.commit()
+                                cursor.close()
+                                conn.close()
+                            except Exception as e:
+                                logger.warning(f"Failed to update last_login: {str(e)}")
+                            
+                            st.balloons()
+                            st.success(f"✅ Welcome back, {username}!")
+                            import time
+                            time.sleep(1)
+                            st.rerun()
+                        else:
+                            st.error(f"❌ {error_msg}")
+                            # Add delay to prevent brute force attacks
+                            import time
+                            time.sleep(2)
             
             st.markdown("---")
             
@@ -2930,13 +3074,23 @@ def main():
         vehicle_href = "/?public=request_vehicle"
         proc_href = "/?public=procurement_request"
         driver_trip_href = "/?public=driver_trip_entry"
+        
+        # COVID-19/Flu Resource Management Forms (REDCap)
+        covid_test_kit_href = "https://redcap.vdh.virginia.gov/redcap/surveys/?s=JKCF7WMKP8"
+        distribution_reg_href = "https://redcap.vdh.virginia.gov/redcap/surveys/?s=7N4EKRWE7P"
+        epi_tracking_href = "https://redcap.vdh.virginia.gov/redcap/surveys/?s=T7JYPLCPHFHH4XJC"
 
         html_links = (
             '<div style="padding:6px 4px;">'
             f'<a href="{ticket_href}" target="_blank" rel="noopener noreferrer" class="public-link">📩&nbsp;&nbsp;<strong>Submit a Ticket</strong></a><br/>'
             f'<a href="{vehicle_href}" target="_blank" rel="noopener noreferrer" class="public-link">🚗&nbsp;&nbsp;<strong>Request a Vehicle</strong></a><br/>'
             f'<a href="{proc_href}" target="_blank" rel="noopener noreferrer" class="public-link">🛒&nbsp;&nbsp;<strong>Submit a Requisition</strong></a><br/>'
-            f'<a href="{driver_trip_href}" target="_blank" rel="noopener noreferrer" class="public-link">🚙&nbsp;&nbsp;<strong>Driver Trip Entry</strong></a>'
+            f'<a href="{driver_trip_href}" target="_blank" rel="noopener noreferrer" class="public-link">🚙&nbsp;&nbsp;<strong>Driver Trip Entry</strong></a><br/>'
+            '<br/>'
+            '<div style="font-size:0.85em; font-weight:bold; color:#002855; padding:8px 4px;">COVID-19/Flu Resources</div>'
+            f'<a href="{covid_test_kit_href}" target="_blank" rel="noopener noreferrer" class="public-link">🧪&nbsp;&nbsp;<strong>Request Test Kits</strong></a><br/>'
+            f'<a href="{distribution_reg_href}" target="_blank" rel="noopener noreferrer" class="public-link">📝&nbsp;&nbsp;<strong>Distribution Registration</strong></a><br/>'
+            f'<a href="{epi_tracking_href}" target="_blank" rel="noopener noreferrer" class="public-link">📊&nbsp;&nbsp;<strong>Epi Tracking</strong></a>'
             '</div>'
             '<style>'
             '.public-link {'
