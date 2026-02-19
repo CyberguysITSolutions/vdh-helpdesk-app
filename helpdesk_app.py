@@ -343,6 +343,82 @@ def generate_procurement_number():
     now = datetime.now()
     return f"PR-{now.strftime('%Y%m%d%H%M%S')}"
 
+# ===================================================================
+# BARCODE HELPER FUNCTIONS
+# ===================================================================
+
+def generate_barcode_from_db(location='CRATER'):
+    """Generate a new barcode using database function"""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT dbo.fn_GenerateBarcode('ASSET', ?)", (location,))
+        barcode = cursor.fetchone()[0]
+        cursor.close()
+        conn.close()
+        return barcode
+    except Exception as e:
+        st.error(f"Error generating barcode: {e}")
+        return None
+
+def generate_qr_code_image(barcode_value):
+    """Generate QR code image for barcode"""
+    try:
+        import qrcode
+        from PIL import Image
+        
+        qr = qrcode.QRCode(version=1, box_size=10, border=2)
+        qr.add_data(barcode_value)
+        qr.make(fit=True)
+        
+        img = qr.make_image(fill_color="black", back_color="white")
+        
+        buf = BytesIO()
+        img.save(buf, format='PNG')
+        buf.seek(0)
+        
+        return buf
+    except ImportError:
+        # QR code library not installed, return None
+        return None
+    except Exception as e:
+        # Other error, return None
+        return None
+
+def update_asset_barcode(asset_id, new_barcode, username):
+    """Update barcode for an asset"""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        # Update Assets table
+        cursor.execute("""
+            UPDATE dbo.Assets
+            SET barcode_value = ?
+            WHERE asset_id = ?
+        """, (new_barcode, asset_id))
+        
+        # Update or insert into Barcodes tracking table
+        cursor.execute("""
+            MERGE dbo.Barcodes AS target
+            USING (SELECT ? as barcode, ? as asset_id) AS source
+            ON target.entity_id = source.asset_id 
+               AND target.entity_table = 'Assets'
+            WHEN MATCHED THEN
+                UPDATE SET target.barcode_value = source.barcode
+            WHEN NOT MATCHED THEN
+                INSERT (barcode_value, barcode_type, entity_id, entity_table, generated_by)
+                VALUES (source.barcode, 'ASSET', source.asset_id, 'Assets', ?);
+        """, (new_barcode, asset_id, username))
+        
+        conn.commit()
+        cursor.close()
+        conn.close()
+        
+        return True
+    except Exception as e:
+        return False
+
 # Report helpers (Excel / PDF) - unchanged from previous file (omitted here for brevity in comment)
 try:
     from openpyxl import Workbook
@@ -4075,6 +4151,23 @@ def main():
                     
                     serial = st.text_input("Serial Number", placeholder="e.g., 654321abc")
                     
+                    # Barcode field with auto-generate button
+                    st.markdown("**Barcode**")
+                    bcol1, bcol2 = st.columns([3, 1])
+                    with bcol1:
+                        barcode_value = st.text_input(
+                            "Barcode Number",
+                            key="new_asset_barcode",
+                            placeholder="Enter barcode or use generate button",
+                            label_visibility="collapsed"
+                        )
+                    with bcol2:
+                        if st.button("🔢 Generate", key="gen_barcode_new", help="Auto-generate barcode"):
+                            generated = generate_barcode_from_db(location if location else 'CRATER')
+                            if generated:
+                                st.session_state.new_asset_barcode = generated
+                                st.rerun()
+                    
                     location = st.selectbox("Location *", STANDARD_LOCATIONS)
                 
                 with col2:
@@ -4124,10 +4217,10 @@ def main():
                         # Insert into database
                         insert_query = """
                             INSERT INTO dbo.Assets 
-                                (asset_tag, type, category, model, serial, assigned_user, assigned_email, 
+                                (asset_tag, type, category, model, serial, barcode_value, assigned_user, assigned_email, 
                                  assigned_phone, location, purchase_date, warranty_expiration, status, 
                                  created_at, updated_at)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, GETDATE(), GETDATE())
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, GETDATE(), GETDATE())
                         """
                         
                         try:
@@ -4135,8 +4228,9 @@ def main():
                             cursor = conn.cursor()
                             cursor.execute(
                                 insert_query,
-                                asset_tag, asset_type, category, make_model, serial, assigned_user, 
-                                assigned_email, assigned_phone, location, purchase_date, 
+                                asset_tag, asset_type, category, make_model, serial, 
+                                barcode_value if barcode_value else None,
+                                assigned_user, assigned_email, assigned_phone, location, purchase_date, 
                                 warranty_expiration, status
                             )
                             conn.commit()
@@ -4223,6 +4317,13 @@ def main():
                             st.write(f"**Category:** {asset.get('category', 'N/A')}")
                             st.write(f"**Model:** {asset.get('model', 'N/A')}")
                             st.write(f"**Serial:** {asset.get('serial', 'N/A')}")
+                            
+                            # Display barcode
+                            barcode = asset.get('barcode_value')
+                            if barcode and str(barcode) != 'nan' and barcode != 'None':
+                                st.write(f"**Barcode:** `{barcode}`")
+                            else:
+                                st.write(f"**Barcode:** _(Not set)_")
                         
                         with col2:
                             st.write("### Warranty & Purchase")
@@ -4231,6 +4332,14 @@ def main():
                             st.write(f"**Status:** {asset.get('status', 'N/A')}")
                             st.write(f"**Created:** {asset.get('created_at', 'N/A')}")
                             st.write(f"**Updated:** {asset.get('updated_at', 'N/A')}")
+                            
+                            # Display QR code if barcode exists
+                            barcode = asset.get('barcode_value')
+                            if barcode and str(barcode) != 'nan' and barcode != 'None':
+                                qr_img = generate_qr_code_image(barcode)
+                                if qr_img:
+                                    st.write("**QR Code:**")
+                                    st.image(qr_img, width=150, caption="Scan Me")
                     
                     with tab2:
                         col1, col2 = st.columns(2)
@@ -4326,6 +4435,24 @@ def main():
                             
                             serial = st.text_input("Serial Number", value=asset.get('serial', '') or '')
                             
+                            # Barcode field with auto-generate button
+                            st.markdown("**Barcode**")
+                            bcol1, bcol2 = st.columns([3, 1])
+                            with bcol1:
+                                barcode_value = st.text_input(
+                                    "Barcode Number",
+                                    value=asset.get('barcode_value', '') or '',
+                                    key="edit_asset_barcode",
+                                    placeholder="Enter barcode or use generate button",
+                                    label_visibility="collapsed"
+                                )
+                            with bcol2:
+                                if st.button("🔢 Generate", key="gen_barcode_edit", help="Auto-generate barcode"):
+                                    generated = generate_barcode_from_db(asset.get('location', 'CRATER'))
+                                    if generated:
+                                        st.session_state.edit_asset_barcode = generated
+                                        st.rerun()
+                            
                             current_location = asset.get('location', '')
                             location_index = STANDARD_LOCATIONS.index(current_location) if current_location in STANDARD_LOCATIONS else 0
                             location = st.selectbox("Location *", STANDARD_LOCATIONS, index=location_index)
@@ -4394,7 +4521,7 @@ def main():
                                 # Update database
                                 update_query = """
                                     UPDATE dbo.Assets 
-                                    SET asset_tag = ?, type = ?, category = ?, model = ?, serial = ?,
+                                    SET asset_tag = ?, type = ?, category = ?, model = ?, serial = ?, barcode_value = ?,
                                         assigned_user = ?, assigned_email = ?, assigned_phone = ?,
                                         location = ?, purchase_date = ?, warranty_expiration = ?,
                                         status = ?, updated_at = GETDATE()
@@ -4407,6 +4534,7 @@ def main():
                                     cursor.execute(
                                         update_query,
                                         asset_tag, asset_type, category, make_model, serial,
+                                        barcode_value if barcode_value else None,
                                         assigned_user, assigned_email, assigned_phone,
                                         location, purchase_date, warranty_expiration,
                                         status, st.session_state.edit_asset_id
