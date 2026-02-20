@@ -2581,7 +2581,7 @@ def render_edit_resource_form(selected_location_id):
     """
     resource_df, err = execute_query(resource_query, (resource_id,))
     
-    if err or resource_df.empty:
+    if err or resource_df is None or resource_df.empty:
         st.error("Could not load resource details")
         if st.button("← Back"):
             st.session_state.show_edit_resource_form = False
@@ -2590,67 +2590,80 @@ def render_edit_resource_form(selected_location_id):
     
     resource = resource_df.iloc[0]
     
+    # Get categories for dropdown (do this outside form)
+    categories_query = "SELECT category_id, category_name FROM dbo.resource_categories ORDER BY category_name"
+    categories_df, cat_err = execute_query(categories_query)
+    
     with st.form("edit_resource_form"):
         st.markdown("### Resource Information")
         
         col1, col2 = st.columns(2)
         
         with col1:
-            resource_name = st.text_input("Resource Name *", value=resource.get('resource_name', ''))
+            resource_name = st.text_input("Resource Name *", value=str(resource.get('resource_name', '')))
             
-            # Get categories for dropdown
-            categories_query = "SELECT category_id, category_name FROM dbo.resource_categories ORDER BY category_name"
-            categories_df, _ = execute_query(categories_query)
-            
+            # Categories dropdown
             if categories_df is not None and not categories_df.empty:
                 category_options = categories_df['category_name'].tolist()
-                current_category = resource.get('category_name', '')
-                category_index = category_options.index(current_category) if current_category in category_options else 0
+                current_category = str(resource.get('category_name', ''))
+                try:
+                    category_index = category_options.index(current_category) if current_category in category_options else 0
+                except:
+                    category_index = 0
                 category_name = st.selectbox("Category *", category_options, index=category_index)
-                category_id = categories_df[categories_df['category_name'] == category_name].iloc[0]['category_id']
+                category_id = int(categories_df[categories_df['category_name'] == category_name].iloc[0]['category_id'])
             else:
                 st.warning("No categories found")
-                category_id = resource.get('category_id')
+                category_id = int(resource.get('category_id', 1))
             
-            description = st.text_area("Description", value=resource.get('description', '') or '', height=100)
+            description = st.text_area(
+                "Description", 
+                value=str(resource.get('description', '') or ''), 
+                height=100
+            )
         
         with col2:
-            # UPC/Barcode field with generate button
+            # UPC/Barcode field
             st.markdown("**UPC / Barcode Code**")
-            bcol1, bcol2 = st.columns([3, 1])
-            with bcol1:
-                upc_code = st.text_input(
-                    "UPC/Barcode",
-                    value=resource.get('upc_code', '') or '',
-                    key="edit_upc_code",
-                    placeholder="Enter UPC or barcode",
-                    label_visibility="collapsed"
-                )
-            with bcol2:
-                if st.button("🔢 Generate", key="gen_upc", help="Auto-generate barcode"):
-                    generated = generate_barcode_from_db('RESOURCE')
-                    if generated:
-                        st.session_state.edit_upc_code = generated
-                        st.rerun()
             
-            sku = st.text_input("SKU", value=resource.get('sku', '') or '')
+            current_upc = str(resource.get('upc_code', '') or '')
+            upc_code = st.text_input(
+                "UPC/Barcode",
+                value=current_upc,
+                placeholder="Enter UPC or barcode",
+                label_visibility="collapsed"
+            )
             
-            unit_of_measure = st.text_input("Unit of Measure", value=resource.get('unit_of_measure', '') or '')
+            st.caption("💡 Click Generate for auto-barcode, or type manually")
+            
+            sku = st.text_input("SKU", value=str(resource.get('sku', '') or ''))
+            
+            unit_of_measure = st.text_input(
+                "Unit of Measure", 
+                value=str(resource.get('unit_of_measure', '') or '')
+            )
+            
+            try:
+                reorder_val = int(resource.get('reorder_level', 0) or 0)
+            except:
+                reorder_val = 0
             
             reorder_level = st.number_input(
                 "Reorder Level", 
                 min_value=0, 
-                value=int(resource.get('reorder_level', 0))
+                value=reorder_val
             )
         
         st.markdown("---")
         
+        # ALWAYS show these buttons
         col1, col2 = st.columns(2)
         with col1:
             submit = st.form_submit_button("💾 Save Changes", type="primary", use_container_width=True)
         with col2:
             cancel = st.form_submit_button("❌ Cancel", use_container_width=True)
         
+        # Handle button clicks
         if cancel:
             st.session_state.show_edit_resource_form = False
             st.rerun()
@@ -2676,20 +2689,31 @@ def render_edit_resource_form(selected_location_id):
                     WHERE resource_id = ?
                 """
                 
-                result, err = execute_non_query(
-                    update_query, 
-                    (resource_name, category_id, upc_code, sku, description, 
-                     unit_of_measure, reorder_level, username, resource_id)
-                )
-                
-                if err:
-                    st.error(f"❌ Error updating resource: {err}")
-                else:
-                    st.success(f"✅ Resource '{resource_name}' updated successfully!")
-                    import time
-                    time.sleep(1.5)
-                    st.session_state.show_edit_resource_form = False
-                    st.rerun()
+                try:
+                    result, err = execute_non_query(
+                        update_query, 
+                        (resource_name, category_id, upc_code, sku, description, 
+                         unit_of_measure, reorder_level, username, resource_id)
+                    )
+                    
+                    if err:
+                        st.error(f"❌ Error updating resource: {err}")
+                    else:
+                        st.success(f"✅ Resource '{resource_name}' updated successfully!")
+                        import time
+                        time.sleep(1.5)
+                        st.session_state.show_edit_resource_form = False
+                        st.rerun()
+                except Exception as e:
+                    st.error(f"❌ Error: {str(e)}")
+    
+    # Generate button outside form (non-form button)
+    st.markdown("---")
+    if st.button("🔢 Generate New Barcode", key="gen_barcode_outside"):
+        generated = generate_barcode_from_db('RESOURCE')
+        if generated:
+            st.info(f"Generated barcode: **{generated}**")
+            st.warning("Copy this barcode and paste it into the UPC field above, then click Save Changes")
     
     # Show back button outside form
     if st.button("← Back to Inventory", key="back_from_edit"):
