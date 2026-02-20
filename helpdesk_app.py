@@ -1728,7 +1728,7 @@ def render_inventory_management():
         st.warning("No locations configured")
         return
     
-    col1, col2, col3 = st.columns([2, 2, 1])
+    col1, col2, col3, col4 = st.columns([2, 2, 1, 1])
     with col1:
         selected_location_id = st.selectbox(
             "Select Location",
@@ -1741,10 +1741,18 @@ def render_inventory_management():
     with col3:
         if st.button("➕ Adjust Stock"):
             st.session_state.show_adjust_form = True
+    with col4:
+        if st.button("✏️ Edit Resource"):
+            st.session_state.show_edit_resource_form = True
     
     # Show adjustment form if requested
     if st.session_state.get('show_adjust_form', False):
         render_adjust_stock_form(selected_location_id)
+        return
+    
+    # Show edit resource form if requested
+    if st.session_state.get('show_edit_resource_form', False):
+        render_edit_resource_form(selected_location_id)
         return
     
     inventory_df = get_inventory_by_location(selected_location_id)
@@ -1775,8 +1783,9 @@ def render_inventory_management():
     )
     
     st.markdown("### Current Inventory")
+    # Include UPC code in display
     st.dataframe(
-        inventory_df[['resource_name', 'category_name', 'quantity_on_hand', 'quantity_allocated', 
+        inventory_df[['resource_name', 'upc_code', 'category_name', 'quantity_on_hand', 'quantity_allocated', 
                       'quantity_available', 'reorder_level', 'status', 'unit_of_measure']],
         use_container_width=True,
         hide_index=True
@@ -2541,6 +2550,151 @@ def render_adjust_stock_form(selected_location_id):
                         time.sleep(1)
                         st.session_state.show_adjust_form = False
                         st.rerun()
+
+def render_edit_resource_form(selected_location_id):
+    """Form to edit resource details including barcode/UPC"""
+    st.subheader("✏️ Edit Resource")
+    
+    inventory_df = get_inventory_by_location(selected_location_id)
+    
+    if inventory_df.empty:
+        st.warning("No resources available to edit")
+        if st.button("← Back"):
+            st.session_state.show_edit_resource_form = False
+            st.rerun()
+        return
+    
+    # Select resource to edit
+    resource_options = inventory_df['resource_name'].tolist()
+    selected_resource = st.selectbox("Select Resource to Edit", resource_options)
+    
+    # Get current resource data
+    current_row = inventory_df[inventory_df['resource_name'] == selected_resource].iloc[0]
+    resource_id = int(current_row['resource_id'])
+    
+    # Fetch full resource details from resources table
+    resource_query = """
+        SELECT r.*, rc.category_name 
+        FROM dbo.resources r
+        LEFT JOIN dbo.resource_categories rc ON r.category_id = rc.category_id
+        WHERE r.resource_id = ?
+    """
+    resource_df, err = execute_query(resource_query, (resource_id,))
+    
+    if err or resource_df.empty:
+        st.error("Could not load resource details")
+        if st.button("← Back"):
+            st.session_state.show_edit_resource_form = False
+            st.rerun()
+        return
+    
+    resource = resource_df.iloc[0]
+    
+    with st.form("edit_resource_form"):
+        st.markdown("### Resource Information")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            resource_name = st.text_input("Resource Name *", value=resource.get('resource_name', ''))
+            
+            # Get categories for dropdown
+            categories_query = "SELECT category_id, category_name FROM dbo.resource_categories ORDER BY category_name"
+            categories_df, _ = execute_query(categories_query)
+            
+            if categories_df is not None and not categories_df.empty:
+                category_options = categories_df['category_name'].tolist()
+                current_category = resource.get('category_name', '')
+                category_index = category_options.index(current_category) if current_category in category_options else 0
+                category_name = st.selectbox("Category *", category_options, index=category_index)
+                category_id = categories_df[categories_df['category_name'] == category_name].iloc[0]['category_id']
+            else:
+                st.warning("No categories found")
+                category_id = resource.get('category_id')
+            
+            description = st.text_area("Description", value=resource.get('description', '') or '', height=100)
+        
+        with col2:
+            # UPC/Barcode field with generate button
+            st.markdown("**UPC / Barcode Code**")
+            bcol1, bcol2 = st.columns([3, 1])
+            with bcol1:
+                upc_code = st.text_input(
+                    "UPC/Barcode",
+                    value=resource.get('upc_code', '') or '',
+                    key="edit_upc_code",
+                    placeholder="Enter UPC or barcode",
+                    label_visibility="collapsed"
+                )
+            with bcol2:
+                if st.button("🔢 Generate", key="gen_upc", help="Auto-generate barcode"):
+                    generated = generate_barcode_from_db('RESOURCE')
+                    if generated:
+                        st.session_state.edit_upc_code = generated
+                        st.rerun()
+            
+            sku = st.text_input("SKU", value=resource.get('sku', '') or '')
+            
+            unit_of_measure = st.text_input("Unit of Measure", value=resource.get('unit_of_measure', '') or '')
+            
+            reorder_level = st.number_input(
+                "Reorder Level", 
+                min_value=0, 
+                value=int(resource.get('reorder_level', 0))
+            )
+        
+        st.markdown("---")
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            submit = st.form_submit_button("💾 Save Changes", type="primary", use_container_width=True)
+        with col2:
+            cancel = st.form_submit_button("❌ Cancel", use_container_width=True)
+        
+        if cancel:
+            st.session_state.show_edit_resource_form = False
+            st.rerun()
+        
+        if submit:
+            if not resource_name or not upc_code:
+                st.error("⚠️ Please fill in Resource Name and UPC/Barcode")
+            else:
+                username = st.session_state.get('username', 'Unknown')
+                
+                # Update resource
+                update_query = """
+                    UPDATE dbo.resources 
+                    SET resource_name = ?,
+                        category_id = ?,
+                        upc_code = ?,
+                        sku = ?,
+                        description = ?,
+                        unit_of_measure = ?,
+                        reorder_level = ?,
+                        updated_by = ?,
+                        updated_at = GETDATE()
+                    WHERE resource_id = ?
+                """
+                
+                result, err = execute_non_query(
+                    update_query, 
+                    (resource_name, category_id, upc_code, sku, description, 
+                     unit_of_measure, reorder_level, username, resource_id)
+                )
+                
+                if err:
+                    st.error(f"❌ Error updating resource: {err}")
+                else:
+                    st.success(f"✅ Resource '{resource_name}' updated successfully!")
+                    import time
+                    time.sleep(1.5)
+                    st.session_state.show_edit_resource_form = False
+                    st.rerun()
+    
+    # Show back button outside form
+    if st.button("← Back to Inventory", key="back_from_edit"):
+        st.session_state.show_edit_resource_form = False
+        st.rerun()
 
 def render_distribution_platform():
     """Resource Distribution Platform - Barcode Scanning & Inventory Distribution"""
