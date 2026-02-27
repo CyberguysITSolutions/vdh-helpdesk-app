@@ -1,0 +1,50 @@
+# Debugging workflow to reveal working directory and run DB connectivity test
+# Add/merge this into your existing workflow or replace the test job step
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+
+jobs:
+  test-db-connection:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Show environment and workspace
+        run: |
+          echo "GITHUB_WORKSPACE = $GITHUB_WORKSPACE"
+          echo "PWD = $(pwd)"
+          echo "List workspace root:"
+          ls -la "$GITHUB_WORKSPACE" || true
+          echo "List runner work dir:"
+          ls -la /home/runner/work || true
+
+      - name: Show recursive tree (first 3 levels)
+        run: |
+          find "$GITHUB_WORKSPACE" -maxdepth 3 -type f -print | sed -n '1,200p' || true
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install requirements
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+
+      - name: Run DB connectivity test (explicit path)
+        shell: bash
+        run: |
+          # Try running with the repo-root relative path first
+          echo "Attempting: python ./test_db_ci.py"
+          python ./test_db_ci.py || true
+
+          # Also try alternative likely paths if the file lives under a folder (uncomment if needed)
+          # echo "Attempting: python ./db/test_db_ci.py"
+          # python ./db/test_db_ci.py || true
+
+          # Print error code for debugging
+          echo "Exit code was $?"

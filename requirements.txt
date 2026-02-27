@@ -1,0 +1,21 @@
+# Core dependencies
+streamlit==1.31.0
+pandas==2.1.4
+pyodbc==5.0.1
+
+# Excel/PDF generation
+openpyxl==3.1.2
+reportlab==4.0.7
+
+# Email functionality
+python-dotenv==1.0.0
+
+# Security - password hashing
+werkzeug==3.0.1
+
+# Charts and visualization
+plotly==5.18.0
+
+# Utilities
+Pillow==10.2.0
+qrcode==7.4.2

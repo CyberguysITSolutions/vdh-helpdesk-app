@@ -1,0 +1,23 @@
+[server]
+port = 8000
+headless = true
+address = "0.0.0.0"
+enableCORS = false
+enableXsrfProtection = true
+maxUploadSize = 200
+
+[browser]
+gatherUsageStats = false
+serverAddress = "vdh-helpdesk-app-dxh7cpcgh2e9gngt.eastus2-01.azurewebsites.net"
+serverPort = 443
+
+[client]
+showErrorDetails = false
+toolbarMode = "minimal"
+
+[theme]
+primaryColor = "#0078D4"
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#F5F5F5"
+textColor = "#262730"
+font = "sans serif"

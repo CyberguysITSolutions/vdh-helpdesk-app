@@ -1,0 +1,17 @@
+[client]
+# Suppress unnecessary client-side messages
+showErrorDetails = false
+
+[logger]
+# Only show errors, not warnings about secrets
+level = "error"
+
+[server]
+# Production server settings
+headless = true
+enableCORS = false
+enableXsrfProtection = true
+
+[browser]
+# Don't try to open browser automatically
+gatherUsageStats = false

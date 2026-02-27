@@ -1,0 +1,14 @@
+
+package.zip
+oryx-full.log
+dockerignore.txt
+*.zip
+*.log
+
+*.zip
+*.log
+dockerignore.txt
+
+*.zip
+*.log
+dockerignore.txt
