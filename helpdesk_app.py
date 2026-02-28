@@ -29,6 +29,12 @@ from urllib.parse import quote, urlparse
 import streamlit as st
 import streamlit.components.v1 as components
 
+# Suppress Streamlit secrets warnings
+os.environ["STREAMLIT_SERVER_ENABLE_STATIC_SERVING"] = "false"
+secrets_dir = Path.home() / ".streamlit"
+secrets_dir.mkdir(exist_ok=True)
+(secrets_dir / "secrets.toml").touch()
+
 import pandas as pd
 import smtplib
 from email.message import EmailMessage
