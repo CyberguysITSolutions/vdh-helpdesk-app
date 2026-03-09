@@ -1259,21 +1259,22 @@ def render_request_vehicle_public_form():
                             # Send comprehensive email notifications (requester + fleet admin)
                             if HAS_EMAIL_AUTOMATION and new_request_id:
                                 try:
+                                    # Convert all numeric values to Python native types (avoid numpy.int64 errors)
                                     request_data = {
-                                        'request_id': new_request_id,
-                                        'requester_name': requester_name,
-                                        'requester_email': requester_email,
-                                        'requester_phone': requester_phone,
-                                        'department': requester_location,
-                                        'year': vehicle['year'],
-                                        'make_model': vehicle['make_model'],
-                                        'license_plate': vehicle['license_plate'],
-                                        'current_mileage': vehicle.get('current_mileage', 0),
+                                        'request_id': int(new_request_id) if new_request_id else 0,
+                                        'requester_name': str(requester_name),
+                                        'requester_email': str(requester_email),
+                                        'requester_phone': str(requester_phone) if requester_phone else '',
+                                        'department': str(requester_location),
+                                        'year': int(vehicle['year']) if vehicle.get('year') else 0,
+                                        'make_model': str(vehicle['make_model']) if vehicle.get('make_model') else '',
+                                        'license_plate': str(vehicle['license_plate']) if vehicle.get('license_plate') else '',
+                                        'current_mileage': int(vehicle.get('current_mileage', 0)),
                                         'start_date': str(start_date),
                                         'end_date': str(end_date),
-                                        'destination': requester_location,
-                                        'estimated_miles': estimated_miles,
-                                        'purpose': purpose
+                                        'destination': str(requester_location),
+                                        'estimated_miles': int(estimated_miles) if estimated_miles else 0,
+                                        'purpose': str(purpose)
                                     }
                                     email_vehicle_request_submitted(request_data)
                                     logger.info(f"Vehicle request emails sent for request #{new_request_id}")
@@ -1612,18 +1613,18 @@ def render_driver_trip_entry_public_form():
                                     if vehicle_result is not None and not vehicle_result.empty:
                                         vehicle_info = vehicle_result.iloc[0]
                                         
-                                        # Prepare trip data for email
+                                        # Prepare trip data for email (convert to Python native types)
                                         trip_data = {
-                                            'trip_id': new_trip_id,
-                                            'driver_name': driver_name,
-                                            'driver_email': driver_email,
-                                            'department': department,
-                                            'make_model': vehicle_info['make_model'],
-                                            'license_plate': vehicle_info['license_plate'],
-                                            'start_location': start_location,
-                                            'start_mileage': start_mileage,
+                                            'trip_id': int(new_trip_id) if new_trip_id else 0,
+                                            'driver_name': str(driver_name),
+                                            'driver_email': str(driver_email),
+                                            'department': str(department),
+                                            'make_model': str(vehicle_info['make_model']) if vehicle_info.get('make_model') else '',
+                                            'license_plate': str(vehicle_info['license_plate']) if vehicle_info.get('license_plate') else '',
+                                            'start_location': str(start_location),
+                                            'start_mileage': int(start_mileage) if start_mileage else 0,
                                             'start_datetime': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-                                            'notes': trip_notes or 'No notes'
+                                            'notes': str(trip_notes) if trip_notes else 'No notes'
                                         }
                                         
                                         # Send trip started notification to fleet admin
@@ -1738,19 +1739,19 @@ def render_driver_trip_entry_public_form():
                                     if vehicle_result is not None and not vehicle_result.empty:
                                         vehicle_info = vehicle_result.iloc[0]
                                         
-                                        # Prepare trip data for email
+                                        # Prepare trip data for email (convert to Python native types)
                                         trip_data = {
-                                            'trip_id': trip_id,
-                                            'driver_name': start_info['driver_name'],
-                                            'driver_email': start_info['driver_email'],
-                                            'department': start_info['department'],
-                                            'make_model': vehicle_info['make_model'],
-                                            'license_plate': vehicle_info['license_plate'],
-                                            'start_location': start_info['start_location'],
-                                            'end_location': end_location,
-                                            'start_mileage': int(start_info['start_mileage']),
-                                            'end_mileage': int(end_mileage),
-                                            'start_datetime': str(start_info['start_datetime']),
+                                            'trip_id': int(trip_id) if trip_id else 0,
+                                            'driver_name': str(start_info['driver_name']) if start_info.get('driver_name') else '',
+                                            'driver_email': str(start_info['driver_email']) if start_info.get('driver_email') else '',
+                                            'department': str(start_info['department']) if start_info.get('department') else '',
+                                            'make_model': str(vehicle_info['make_model']) if vehicle_info.get('make_model') else '',
+                                            'license_plate': str(vehicle_info['license_plate']) if vehicle_info.get('license_plate') else '',
+                                            'start_location': str(start_info['start_location']) if start_info.get('start_location') else '',
+                                            'end_location': str(end_location),
+                                            'start_mileage': int(start_info['start_mileage']) if start_info.get('start_mileage') else 0,
+                                            'end_mileage': int(end_mileage) if end_mileage else 0,
+                                            'start_datetime': str(start_info['start_datetime']) if start_info.get('start_datetime') else '',
                                             'end_datetime': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
                                         }
                                         
