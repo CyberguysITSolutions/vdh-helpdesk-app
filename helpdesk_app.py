@@ -739,7 +739,7 @@ def render_helpdesk_ticket_public_form():
     department_default = ""
     location_default = ""
     
-    if HAS_USER_PROFILES and DB_AVAILABLE:
+    if HAS_USER_PROFILES and check_db_available():
         st.write("### 👤 Your Information")
         st.info("💡 Enter your email and click 🔍 Lookup to auto-fill your information below")
         
@@ -779,7 +779,7 @@ def render_helpdesk_ticket_public_form():
     
     with st.form("public_helpdesk_form", clear_on_submit=False):
         # User information fields
-        if HAS_USER_PROFILES and DB_AVAILABLE:
+        if HAS_USER_PROFILES and check_db_available():
             st.write("### 📝 Contact Details")
         else:
             st.write("### 👤 Your Information")
@@ -1095,7 +1095,7 @@ def render_request_vehicle_public_form():
             requester_name_default = ""
             requester_phone_default = ""
             
-            if HAS_USER_PROFILES and DB_AVAILABLE:
+            if HAS_USER_PROFILES and check_db_available():
                 st.write("### 👤 Your Information")
                 st.info("💡 Enter your email and click 🔍 Lookup to auto-fill your information below")
                 
@@ -1353,7 +1353,7 @@ def render_procurement_request_public_form():
     department_default = ""
     location_default = ""
     
-    if HAS_USER_PROFILES and DB_AVAILABLE:
+    if HAS_USER_PROFILES and check_db_available():
         st.write("### 👤 Requester Information")
         st.info("💡 Enter your email and click 🔍 Lookup to auto-fill your information below")
         
@@ -1392,7 +1392,7 @@ def render_procurement_request_public_form():
     
     with st.form("public_procurement_form", clear_on_submit=False):
         # User information fields
-        if HAS_USER_PROFILES and DB_AVAILABLE:
+        if HAS_USER_PROFILES and check_db_available():
             st.write("### 📝 Contact Details")
         else:
             st.write("### 👤 Requester Information")
@@ -1407,7 +1407,7 @@ def render_procurement_request_public_form():
             location_index = location_options.index(location_default)
         location = st.selectbox("Location *", location_options, index=location_index, key="procurement_form_location")
         
-        if HAS_USER_PROFILES and DB_AVAILABLE and department_default:
+        if HAS_USER_PROFILES and check_db_available() and department_default:
             department = st.text_input("Department (optional)", value=department_default, key="procurement_form_dept")
         else:
             department = ""
@@ -1439,7 +1439,7 @@ def render_procurement_request_public_form():
                 _append_submission_csv("procurement_requests", row)
                 
                 # Create/update user profile
-                if HAS_USER_PROFILES and DB_AVAILABLE:
+                if HAS_USER_PROFILES and check_db_available():
                     try:
                         create_or_update_user_profile(
                             email=email,
