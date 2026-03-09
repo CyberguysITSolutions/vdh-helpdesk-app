@@ -1133,7 +1133,7 @@ def render_request_vehicle_public_form():
             
             # Request form (no buttons allowed except submit button)
             with st.form("vehicle_request_form"):
-                if not HAS_USER_PROFILES or not DB_AVAILABLE:
+                if not HAS_USER_PROFILES or not check_db_available():
                     st.write("### Your Information")
                 
                 col1, col2 = st.columns(2)
