@@ -60,25 +60,8 @@ try:
     )
     HAS_EMAIL_AUTOMATION = True
 except ImportError as e:
-    # Logger not defined yet, use print
-    print(f"⚠️ Email automation not available: {e}")
+    logger.warning(f"Email automation not available: {e}")
     HAS_EMAIL_AUTOMATION = False
-
-# User profile management imports
-try:
-    from user_profile_manager import (
-        get_user_profile_by_email,
-        create_or_update_user_profile,
-        increment_usage_counter,
-        render_email_lookup_widget,
-        render_autofill_form_fields,
-        render_profile_info_box,
-        render_user_profile_manager
-    )
-    HAS_USER_PROFILES = True
-except ImportError as e:
-    print(f"⚠️ User profile management not available: {e}")
-    HAS_USER_PROFILES = False
 
 # App colors
 VDH_NAVY = "#002855"
@@ -730,66 +713,13 @@ def render_helpdesk_ticket_public_form():
     
     st.title("Submit Helpdesk Ticket")
     st.markdown("Use this form to submit a public helpdesk ticket. Provide contact info and a description of your issue.")
-    
-    # Email lookup OUTSIDE the form (buttons not allowed inside forms)
-    profile = None
-    email_default = ""
-    name_default = ""
-    phone_default = ""
-    department_default = ""
-    location_default = ""
-    
-    if HAS_USER_PROFILES and check_db_available():
-        st.write("### 👤 Your Information")
-        st.info("💡 Enter your email and click 🔍 Lookup to auto-fill your information below")
-        
-        col1, col2 = st.columns([3, 1])
-        with col1:
-            lookup_email = st.text_input(
-                "📧 Email Address",
-                key="helpdesk_lookup_email",
-                placeholder="user@vdh.virginia.gov"
-            )
-        with col2:
-            st.write("")  # Spacer
-            st.write("")  # Spacer
-            if st.button("🔍 Lookup", key="helpdesk_lookup_btn"):
-                if lookup_email:
-                    profile_result = get_user_profile_by_email(lookup_email, execute_query)
-                    if profile_result:
-                        st.session_state['helpdesk_profile'] = profile_result
-                        st.session_state['helpdesk_email'] = lookup_email
-                        st.success(f"✅ Found profile for {profile_result.get('full_name', 'User')}")
-                        st.rerun()
-                    else:
-                        st.session_state['helpdesk_profile'] = None
-                        st.session_state['helpdesk_email'] = lookup_email
-                        st.info("👤 New user - please fill in your information in the form below")
-        
-        # Get profile from session state
-        if 'helpdesk_profile' in st.session_state and st.session_state['helpdesk_profile']:
-            profile = st.session_state['helpdesk_profile']
-            email_default = st.session_state.get('helpdesk_email', '')
-            name_default = profile.get('full_name', '')
-            phone_default = profile.get('phone', '')
-            department_default = profile.get('department', '')
-            location_default = profile.get('location', '')
-        elif 'helpdesk_email' in st.session_state:
-            email_default = st.session_state['helpdesk_email']
-    
     with st.form("public_helpdesk_form", clear_on_submit=False):
-        # User information fields
-        if HAS_USER_PROFILES and check_db_available():
-            st.write("### 📝 Contact Details")
-        else:
-            st.write("### 👤 Your Information")
-        
-        name = st.text_input("Full name *", value=name_default, key="helpdesk_form_name")
-        email = st.text_input("Email *", value=email_default, key="helpdesk_form_email")
-        phone = st.text_input("Phone (optional)", value=phone_default, key="helpdesk_form_phone")
+        name = st.text_input("Full name *", "")
+        email = st.text_input("Email *", "")
+        phone = st.text_input("Phone (optional)", "")
         
         # Add location dropdown
-        location_options = [
+        location = st.selectbox("Location *", [
             "",  # Empty default to force selection
             "Petersburg Health Department",
             "Dinwiddie County Health Department",
@@ -799,22 +729,14 @@ def render_helpdesk_ticket_public_form():
             "Hopewell Health Department",
             "Greensville/Emporia Health Department",
             "Other/Not Listed"
-        ]
-        location_index = 0
-        if location_default and location_default in location_options:
-            location_index = location_options.index(location_default)
-        location = st.selectbox("Location *", location_options, index=location_index, key="helpdesk_form_location")
+        ])
         
-        department = st.text_input("Department (optional)", value=department_default, key="helpdesk_form_dept")
-        
-        # Rest of form (same for both paths)
-        st.write("### 🎫 Ticket Details")
+        department = st.text_input("Department (optional)", "")
         subject = st.text_input("Subject *", "")
         priority = st.selectbox("Priority", ["Low", "Medium", "High"], index=1)
         description = st.text_area("Description *", height=200)
         attachments = st.file_uploader("Attachments (optional)", accept_multiple_files=True)
         submitted = st.form_submit_button("Submit Ticket")
-        
     if submitted:
         # Validation
         if not name or not email or not subject or not description or not location:
@@ -853,25 +775,6 @@ def render_helpdesk_ticket_public_form():
                     )
                     if not success:
                         logger.warning(f"Failed to save ticket to database: {error}")
-                    
-                    # Create/update user profile
-                    if HAS_USER_PROFILES and success:
-                        try:
-                            create_or_update_user_profile(
-                                email=email,
-                                full_name=name,
-                                phone=phone,
-                                department=department,
-                                location=location,
-                                form_source="Helpdesk Ticket",
-                                execute_non_query_func=execute_non_query
-                            )
-                            
-                            # Increment ticket counter
-                            increment_usage_counter(email, 'ticket', execute_non_query)
-                            logger.info(f"User profile created/updated for {email}")
-                        except Exception as e:
-                            logger.error(f"Failed to create/update user profile: {e}")
                 
                 if attachments:
                     adir = _ensure_submissions_dir() / submission_id
@@ -1089,79 +992,21 @@ def render_request_vehicle_public_form():
             
             st.markdown("---")
             
-            # Email lookup OUTSIDE the form (buttons not allowed inside forms)
-            profile = None
-            requester_email_default = ""
-            requester_name_default = ""
-            requester_phone_default = ""
-            
-            if HAS_USER_PROFILES and check_db_available():
-                st.write("### 👤 Your Information")
-                st.info("💡 Enter your email and click 🔍 Lookup to auto-fill your information below")
-                
-                col1, col2 = st.columns([3, 1])
-                with col1:
-                    lookup_email = st.text_input(
-                        "📧 Email Address",
-                        key="vehicle_lookup_email",
-                        placeholder="user@vdh.virginia.gov"
-                    )
-                with col2:
-                    st.write("")  # Spacer
-                    st.write("")  # Spacer
-                    if st.button("🔍 Lookup", key="vehicle_lookup_btn"):
-                        if lookup_email:
-                            profile_result = get_user_profile_by_email(lookup_email, execute_query)
-                            if profile_result:
-                                st.session_state['vehicle_profile'] = profile_result
-                                st.session_state['vehicle_email'] = lookup_email
-                                st.success(f"✅ Found profile for {profile_result.get('full_name', 'User')}")
-                                st.rerun()
-                            else:
-                                st.session_state['vehicle_profile'] = None
-                                st.session_state['vehicle_email'] = lookup_email
-                                st.info("👤 New user - please fill in your information in the form below")
-                
-                # Get profile from session state
-                if 'vehicle_profile' in st.session_state and st.session_state['vehicle_profile']:
-                    profile = st.session_state['vehicle_profile']
-                    requester_email_default = st.session_state.get('vehicle_email', '')
-                    requester_name_default = profile.get('full_name', '')
-                    requester_phone_default = profile.get('phone', '')
-                elif 'vehicle_email' in st.session_state:
-                    requester_email_default = st.session_state['vehicle_email']
-            
-            # Request form (no buttons allowed except submit button)
+            # Request form
             with st.form("vehicle_request_form"):
-                if not HAS_USER_PROFILES or not check_db_available():
-                    st.write("### Your Information")
+                st.write("### Your Information")
                 
                 col1, col2 = st.columns(2)
                 with col1:
-                    requester_name = st.text_input(
-                        "👤 Full Name *", 
-                        value=requester_name_default,
-                        placeholder="John Doe",
-                        key="vehicle_form_name"
-                    )
-                    requester_email = st.text_input(
-                        "📧 Email *", 
-                        value=requester_email_default,
-                        placeholder="john.doe@vdh.virginia.gov",
-                        key="vehicle_form_email"
-                    )
+                    requester_name = st.text_input("Full Name *", placeholder="John Doe")
+                    requester_email = st.text_input("Email *", placeholder="john.doe@vdh.virginia.gov")
                 with col2:
-                    requester_phone = st.text_input(
-                        "📞 Phone Number *", 
-                        value=requester_phone_default,
-                        placeholder="804-555-1234",
-                        key="vehicle_form_phone"
-                    )
-                    requester_location = st.selectbox("📍 Your Location *", [
+                    requester_phone = st.text_input("Phone Number", placeholder="804-555-1234")
+                    requester_location = st.selectbox("Your Location *", [
                         "", "Crater", "Dinwiddie County", "Greensville/Emporia", 
                         "Surry County", "Prince George", "Sussex County", 
                         "Hopewell", "Petersburg"
-                    ], key="vehicle_form_location")
+                    ])
                 
                 st.write("### Trip Details")
                 
@@ -1238,43 +1083,24 @@ def render_request_vehicle_public_form():
                             message = f"New vehicle request from {requester_name} for {vehicle['year']} {vehicle['make_model']}"
                             execute_non_query(notif_query, (message, requester_name))
                             
-                            # Create/update user profile
-                            if HAS_USER_PROFILES:
-                                try:
-                                    create_or_update_user_profile(
-                                        email=requester_email,
-                                        full_name=requester_name,
-                                        phone=requester_phone,
-                                        location=requester_location,
-                                        form_source="Vehicle Request",
-                                        execute_non_query_func=execute_non_query
-                                    )
-                                    
-                                    # Increment vehicle request counter
-                                    increment_usage_counter(requester_email, 'vehicle_request', execute_non_query)
-                                    logger.info(f"User profile created/updated for {requester_email}")
-                                except Exception as e:
-                                    logger.error(f"Failed to create/update user profile: {e}")
-                            
                             # Send comprehensive email notifications (requester + fleet admin)
                             if HAS_EMAIL_AUTOMATION and new_request_id:
                                 try:
-                                    # Convert all numeric values to Python native types (avoid numpy.int64 errors)
                                     request_data = {
-                                        'request_id': int(new_request_id) if new_request_id else 0,
-                                        'requester_name': str(requester_name),
-                                        'requester_email': str(requester_email),
-                                        'requester_phone': str(requester_phone) if requester_phone else '',
-                                        'department': str(requester_location),
-                                        'year': int(vehicle['year']) if vehicle.get('year') else 0,
-                                        'make_model': str(vehicle['make_model']) if vehicle.get('make_model') else '',
-                                        'license_plate': str(vehicle['license_plate']) if vehicle.get('license_plate') else '',
-                                        'current_mileage': int(vehicle.get('current_mileage', 0)),
+                                        'request_id': new_request_id,
+                                        'requester_name': requester_name,
+                                        'requester_email': requester_email,
+                                        'requester_phone': requester_phone,
+                                        'department': requester_location,
+                                        'year': vehicle['year'],
+                                        'make_model': vehicle['make_model'],
+                                        'license_plate': vehicle['license_plate'],
+                                        'current_mileage': vehicle.get('current_mileage', 0),
                                         'start_date': str(start_date),
                                         'end_date': str(end_date),
-                                        'destination': str(requester_location),
-                                        'estimated_miles': int(estimated_miles) if estimated_miles else 0,
-                                        'purpose': str(purpose)
+                                        'destination': requester_location,
+                                        'estimated_miles': estimated_miles,
+                                        'purpose': purpose
                                     }
                                     email_vehicle_request_submitted(request_data)
                                     logger.info(f"Vehicle request emails sent for request #{new_request_id}")
@@ -1346,122 +1172,31 @@ def render_procurement_request_public_form():
     
     st.title("Public Procurement Request")
     st.markdown("Submit a procurement request using this public form.")
-    
-    # Email lookup OUTSIDE the form (buttons not allowed inside forms)
-    profile = None
-    email_default = ""
-    requester_default = ""
-    department_default = ""
-    location_default = ""
-    
-    if HAS_USER_PROFILES and check_db_available():
-        st.write("### 👤 Requester Information")
-        st.info("💡 Enter your email and click 🔍 Lookup to auto-fill your information below")
-        
-        col1, col2 = st.columns([3, 1])
-        with col1:
-            lookup_email = st.text_input(
-                "📧 Email Address",
-                key="procurement_lookup_email",
-                placeholder="user@vdh.virginia.gov"
-            )
-        with col2:
-            st.write("")  # Spacer
-            st.write("")  # Spacer
-            if st.button("🔍 Lookup", key="procurement_lookup_btn"):
-                if lookup_email:
-                    profile_result = get_user_profile_by_email(lookup_email, execute_query)
-                    if profile_result:
-                        st.session_state['procurement_profile'] = profile_result
-                        st.session_state['procurement_email'] = lookup_email
-                        st.success(f"✅ Found profile for {profile_result.get('full_name', 'User')}")
-                        st.rerun()
-                    else:
-                        st.session_state['procurement_profile'] = None
-                        st.session_state['procurement_email'] = lookup_email
-                        st.info("👤 New user - please fill in your information in the form below")
-        
-        # Get profile from session state
-        if 'procurement_profile' in st.session_state and st.session_state['procurement_profile']:
-            profile = st.session_state['procurement_profile']
-            email_default = st.session_state.get('procurement_email', '')
-            requester_default = profile.get('full_name', '')
-            department_default = profile.get('department', '')
-            location_default = profile.get('location', '')
-        elif 'procurement_email' in st.session_state:
-            email_default = st.session_state['procurement_email']
-    
     with st.form("public_procurement_form", clear_on_submit=False):
-        # User information fields
-        if HAS_USER_PROFILES and check_db_available():
-            st.write("### 📝 Contact Details")
-        else:
-            st.write("### 👤 Requester Information")
-        
-        requester = st.text_input("Requester name *", value=requester_default, key="procurement_form_name")
-        email = st.text_input("Requester email *", value=email_default, key="procurement_form_email")
-        
-        # Location dropdown
-        location_options = STANDARD_LOCATIONS
-        location_index = 0
-        if location_default and location_default in location_options:
-            location_index = location_options.index(location_default)
-        location = st.selectbox("Location *", location_options, index=location_index, key="procurement_form_location")
-        
-        if HAS_USER_PROFILES and check_db_available() and department_default:
-            department = st.text_input("Department (optional)", value=department_default, key="procurement_form_dept")
-        else:
-            department = ""
-        
-        # Procurement details (same for both paths)
-        st.write("### 🛒 Request Details")
-        items = st.text_area("Items / Description *", height=150, 
-            placeholder="Describe the items or services you need to procure...")
-        total = st.text_input("Estimated total amount *", placeholder="$0.00")
+        requester = st.text_input("Requester name", "")
+        email = st.text_input("Requester email", "")
+        location = st.selectbox("Location", STANDARD_LOCATIONS)
+        items = st.text_area("Items / Description", height=150)
+        total = st.text_input("Estimated total amount", "")
         submitted = st.form_submit_button("Submit Requisition")
-        
     if submitted:
-        # Validation
-        if not requester or not email or not location or not items or not total:
-            st.error("❌ Please fill in all required fields marked with *")
-        else:
-            now = datetime.utcnow().isoformat() + "Z"
-            submission_id = datetime.utcnow().strftime("%Y%m%d%H%M%S%f")
-            row = {
-                "submission_id": submission_id,
-                "timestamp_utc": now,
-                "requester": requester,
-                "email": email,
-                "location": location,
-                "items": items,
-                "estimated_total": total
-            }
-            try:
-                _append_submission_csv("procurement_requests", row)
-                
-                # Create/update user profile
-                if HAS_USER_PROFILES and check_db_available():
-                    try:
-                        create_or_update_user_profile(
-                            email=email,
-                            full_name=requester,
-                            department=department,
-                            location=location,
-                            form_source="Procurement Request",
-                            execute_non_query_func=execute_non_query
-                        )
-                        
-                        # Increment procurement counter
-                        increment_usage_counter(email, 'procurement', execute_non_query)
-                        logger.info(f"User profile created/updated for {email}")
-                    except Exception as e:
-                        logger.error(f"Failed to create/update user profile: {e}")
-                
-                st.success(f"✅ Procurement request submitted successfully! (ID: {submission_id})")
-                st.balloons()
-            except Exception as e:
-                st.error("Failed to save procurement request")
-                st.exception(e)
+        now = datetime.utcnow().isoformat() + "Z"
+        submission_id = datetime.utcnow().strftime("%Y%m%d%H%M%S%f")
+        row = {
+            "submission_id": submission_id,
+            "timestamp_utc": now,
+            "requester": requester,
+            "email": email,
+            "location": location,
+            "items": items,
+            "estimated_total": total
+        }
+        try:
+            _append_submission_csv("procurement_requests", row)
+            st.success(f"Procurement request submitted (ID: {submission_id})")
+        except Exception as e:
+            st.error("Failed to save procurement request")
+            st.exception(e)
 
 def render_driver_trip_entry_public_form():
     """Public form for drivers to log trip start/end"""
@@ -1613,18 +1348,18 @@ def render_driver_trip_entry_public_form():
                                     if vehicle_result is not None and not vehicle_result.empty:
                                         vehicle_info = vehicle_result.iloc[0]
                                         
-                                        # Prepare trip data for email (convert to Python native types)
+                                        # Prepare trip data for email
                                         trip_data = {
-                                            'trip_id': int(new_trip_id) if new_trip_id else 0,
-                                            'driver_name': str(driver_name),
-                                            'driver_email': str(driver_email),
-                                            'department': str(department),
-                                            'make_model': str(vehicle_info['make_model']) if vehicle_info.get('make_model') else '',
-                                            'license_plate': str(vehicle_info['license_plate']) if vehicle_info.get('license_plate') else '',
-                                            'start_location': str(start_location),
-                                            'start_mileage': int(start_mileage) if start_mileage else 0,
+                                            'trip_id': new_trip_id,
+                                            'driver_name': driver_name,
+                                            'driver_email': driver_email,
+                                            'department': department,
+                                            'make_model': vehicle_info['make_model'],
+                                            'license_plate': vehicle_info['license_plate'],
+                                            'start_location': start_location,
+                                            'start_mileage': start_mileage,
                                             'start_datetime': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-                                            'notes': str(trip_notes) if trip_notes else 'No notes'
+                                            'notes': trip_notes or 'No notes'
                                         }
                                         
                                         # Send trip started notification to fleet admin
@@ -1739,19 +1474,19 @@ def render_driver_trip_entry_public_form():
                                     if vehicle_result is not None and not vehicle_result.empty:
                                         vehicle_info = vehicle_result.iloc[0]
                                         
-                                        # Prepare trip data for email (convert to Python native types)
+                                        # Prepare trip data for email
                                         trip_data = {
-                                            'trip_id': int(trip_id) if trip_id else 0,
-                                            'driver_name': str(start_info['driver_name']) if start_info.get('driver_name') else '',
-                                            'driver_email': str(start_info['driver_email']) if start_info.get('driver_email') else '',
-                                            'department': str(start_info['department']) if start_info.get('department') else '',
-                                            'make_model': str(vehicle_info['make_model']) if vehicle_info.get('make_model') else '',
-                                            'license_plate': str(vehicle_info['license_plate']) if vehicle_info.get('license_plate') else '',
-                                            'start_location': str(start_info['start_location']) if start_info.get('start_location') else '',
-                                            'end_location': str(end_location),
-                                            'start_mileage': int(start_info['start_mileage']) if start_info.get('start_mileage') else 0,
-                                            'end_mileage': int(end_mileage) if end_mileage else 0,
-                                            'start_datetime': str(start_info['start_datetime']) if start_info.get('start_datetime') else '',
+                                            'trip_id': trip_id,
+                                            'driver_name': start_info['driver_name'],
+                                            'driver_email': start_info['driver_email'],
+                                            'department': start_info['department'],
+                                            'make_model': vehicle_info['make_model'],
+                                            'license_plate': vehicle_info['license_plate'],
+                                            'start_location': start_info['start_location'],
+                                            'end_location': end_location,
+                                            'start_mileage': int(start_info['start_mileage']),
+                                            'end_mileage': int(end_mileage),
+                                            'start_datetime': str(start_info['start_datetime']),
                                             'end_datetime': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
                                         }
                                         
@@ -3807,7 +3542,6 @@ def main():
         "💻 Asset Management",
         "🛒 Procurement Requests",
         "🚗 Fleet Management",
-        "👤 User Profiles",
         "📦 Resource Management",
         "📈 Report Builder",
         "🔌 Connection Test",
@@ -4660,24 +4394,19 @@ def main():
                                         if st.button("✅", key=f"save_status_{idx}_{ticket_id}", help="Save"):
                                             # Convert display value to database value
                                             new_status_db = display_to_db.get(new_status_display, new_status_display)
-                                            # Update database with parameterized query
+                                            # Update database
                                             try:
-                                                update_query = "UPDATE dbo.Tickets SET status = ?, updated_at = GETDATE() WHERE ticket_id = ?"
-                                                success, error = execute_non_query(update_query, (new_status_db, ticket_id))
-                                                
-                                                if success:
-                                                    # Clear ALL related session state keys to prevent white screen
-                                                    keys_to_clear = [k for k in st.session_state.keys() if f"_{ticket_id}" in k or "quick_edit" in k]
-                                                    for key in keys_to_clear:
-                                                        del st.session_state[key]
-                                                    
-                                                    st.success(f"✅ Ticket #{ticket_id} status updated to {new_status_display}")
-                                                    st.rerun()
-                                                else:
-                                                    st.error(f"Error updating ticket: {error}")
+                                                update_query = f"UPDATE dbo.Tickets SET status = '{new_status_db}' WHERE ticket_id = {ticket_id}"
+                                                conn = get_db_connection()
+                                                cursor = conn.cursor()
+                                                cursor.execute(update_query)
+                                                conn.commit()
+                                                cursor.close()
+                                                conn.close()
+                                                st.session_state[quick_edit_key] = False
+                                                st.rerun()
                                             except Exception as e:
                                                 st.error(f"Error: {str(e)}")
-                                                logger.exception("Error updating ticket status")
                                     with col_b:
                                         if st.button("❌", key=f"cancel_status_{idx}_{ticket_id}", help="Cancel"):
                                             st.session_state[quick_edit_key] = False
@@ -7105,24 +6834,6 @@ def main():
                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                         use_container_width=True
                     )
-
-    # User Profiles Management
-    elif page == "👤 User Profiles":
-        st.header("👤 User Profile Management")
-        
-        if not DB_AVAILABLE:
-            st.warning("Database unavailable. User profile management requires a live database connection.")
-        elif not HAS_USER_PROFILES:
-            st.warning("⚠️ User profile management module not available.")
-            st.info("""
-            To enable user profiles:
-            1. Add `user_profile_manager.py` to your project folder
-            2. Run `user_profile_system.sql` in your database
-            3. Restart the application
-            """)
-        else:
-            # Render the profile management interface
-            render_user_profile_manager(execute_query, execute_non_query)
 
     # Report Builder and Connection Test
     elif page == "📈 Report Builder":

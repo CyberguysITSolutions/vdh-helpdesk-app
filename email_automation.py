@@ -252,7 +252,7 @@ def email_ticket_created_user(ticket_data: Dict[str, Any]) -> bool:
     body = f"""
     <h2 style="color: {EmailConfig.VDH_NAVY};">Ticket Created Successfully</h2>
     
-    <p>Hello {html.escape(ticket_data.get('requester_name', 'there'))},</p>
+    <p>Hello {html.escape(str(ticket_data.get('requester_name', 'there')))},</p>
     
     <p>Your support ticket has been created and assigned ticket number <strong>#{ticket_data.get('ticket_id')}</strong>.</p>
     
@@ -260,10 +260,10 @@ def email_ticket_created_user(ticket_data: Dict[str, Any]) -> bool:
         <p style="margin: 0;"><strong>Ticket Details:</strong></p>
         <ul style="margin: 10px 0;">
             <li><strong>Ticket #:</strong> {ticket_data.get('ticket_id')}</li>
-            <li><strong>Subject:</strong> {html.escape(ticket_data.get('subject', 'N/A'))}</li>
-            <li><strong>Priority:</strong> {html.escape(ticket_data.get('priority', 'Normal'))}</li>
-            <li><strong>Status:</strong> {html.escape(ticket_data.get('status', 'Open'))}</li>
-            <li><strong>Location:</strong> {html.escape(ticket_data.get('location', 'N/A'))}</li>
+            <li><strong>Subject:</strong> {html.escape(str(ticket_data.get('subject', 'N/A')))}</li>
+            <li><strong>Priority:</strong> {html.escape(str(ticket_data.get('priority', 'Normal')))}</li>
+            <li><strong>Status:</strong> {html.escape(str(ticket_data.get('status', 'Open')))}</li>
+            <li><strong>Location:</strong> {html.escape(str(ticket_data.get('location', 'N/A')))}</li>
         </ul>
     </div>
     
@@ -312,19 +312,19 @@ def email_ticket_created_admin(ticket_data: Dict[str, Any]) -> bool:
         <p style="margin: 0;"><strong>Ticket Information:</strong></p>
         <ul style="margin: 10px 0;">
             <li><strong>Ticket #:</strong> {ticket_data.get('ticket_id')}</li>
-            <li><strong>Subject:</strong> {html.escape(ticket_data.get('subject', 'N/A'))}</li>
-            <li><strong>Priority:</strong> <span style="color: {priority_color}; font-weight: bold;">{html.escape(ticket_data.get('priority', 'Normal'))}</span></li>
-            <li><strong>Category:</strong> {html.escape(ticket_data.get('category', 'N/A'))}</li>
-            <li><strong>Location:</strong> {html.escape(ticket_data.get('location', 'N/A'))}</li>
-            <li><strong>Requester:</strong> {html.escape(ticket_data.get('requester_name', 'N/A'))} ({ticket_data.get('requester_email', 'N/A')})</li>
-            <li><strong>Phone:</strong> {html.escape(ticket_data.get('requester_phone', 'N/A'))}</li>
+            <li><strong>Subject:</strong> {html.escape(str(ticket_data.get('subject', 'N/A')))}</li>
+            <li><strong>Priority:</strong> <span style="color: {priority_color}; font-weight: bold;">{html.escape(str(ticket_data.get('priority', 'Normal')))}</span></li>
+            <li><strong>Category:</strong> {html.escape(str(ticket_data.get('category', 'N/A')))}</li>
+            <li><strong>Location:</strong> {html.escape(str(ticket_data.get('location', 'N/A')))}</li>
+            <li><strong>Requester:</strong> {html.escape(str(ticket_data.get('requester_name', 'N/A')))} ({ticket_data.get('requester_email', 'N/A')})</li>
+            <li><strong>Phone:</strong> {html.escape(str(ticket_data.get('requester_phone', 'N/A')))}</li>
             <li><strong>Submitted:</strong> {ticket_data.get('created_at', datetime.now().strftime('%Y-%m-%d %H:%M'))}</li>
         </ul>
     </div>
     
     <p><strong>Description:</strong></p>
     <div style="background-color: white; border: 1px solid #ddd; padding: 15px; margin: 10px 0;">
-        {html.escape(ticket_data.get('description', 'No description provided'))}
+        {html.escape(str(ticket_data.get('description', 'No description provided')))}
     </div>
     
     {create_button('View & Assign Ticket', ticket_url)}
@@ -362,10 +362,10 @@ def email_ticket_assigned(ticket_data: Dict[str, Any], assigned_to_name: str, as
     <div style="background-color: {EmailConfig.VDH_LIGHT_GRAY}; padding: 15px; border-left: 4px solid {EmailConfig.VDH_ORANGE}; margin: 20px 0;">
         <p style="margin: 0;"><strong>Ticket Details:</strong></p>
         <ul style="margin: 10px 0;">
-            <li><strong>Subject:</strong> {html.escape(ticket_data.get('subject', 'N/A'))}</li>
-            <li><strong>Priority:</strong> {html.escape(ticket_data.get('priority', 'Normal'))}</li>
-            <li><strong>Requester:</strong> {html.escape(ticket_data.get('requester_name', 'N/A'))}</li>
-            <li><strong>Location:</strong> {html.escape(ticket_data.get('location', 'N/A'))}</li>
+            <li><strong>Subject:</strong> {html.escape(str(ticket_data.get('subject', 'N/A')))}</li>
+            <li><strong>Priority:</strong> {html.escape(str(ticket_data.get('priority', 'Normal')))}</li>
+            <li><strong>Requester:</strong> {html.escape(str(ticket_data.get('requester_name', 'N/A')))}</li>
+            <li><strong>Location:</strong> {html.escape(str(ticket_data.get('location', 'N/A')))}</li>
         </ul>
     </div>
     
@@ -391,7 +391,7 @@ def email_ticket_assigned(ticket_data: Dict[str, Any], assigned_to_name: str, as
         requester_body = f"""
         <h2 style="color: {EmailConfig.VDH_NAVY};">Ticket Update</h2>
         
-        <p>Hello {html.escape(ticket_data.get('requester_name', 'there'))},</p>
+        <p>Hello {html.escape(str(ticket_data.get('requester_name', 'there')))},</p>
         
         <p>Good news! Your ticket <strong>#{ticket_data.get('ticket_id')}</strong> has been assigned to our technician <strong>{html.escape(assigned_to_name)}</strong>.</p>
         
@@ -435,7 +435,7 @@ def email_ticket_status_changed(ticket_data: Dict[str, Any], old_status: str, ne
     body = f"""
     <h2 style="color: {EmailConfig.VDH_NAVY};">Ticket Status Updated</h2>
     
-    <p>Hello {html.escape(ticket_data.get('requester_name', 'there'))},</p>
+    <p>Hello {html.escape(str(ticket_data.get('requester_name', 'there')))},</p>
     
     <p>The status of your ticket <strong>#{ticket_data.get('ticket_id')}</strong> has been updated.</p>
     
@@ -476,14 +476,14 @@ def email_ticket_resolved(ticket_data: Dict[str, Any], resolution_notes: str, re
     body = f"""
     <h2 style="color: {EmailConfig.VDH_NAVY};">✅ Ticket Resolved</h2>
     
-    <p>Hello {html.escape(ticket_data.get('requester_name', 'there'))},</p>
+    <p>Hello {html.escape(str(ticket_data.get('requester_name', 'there')))},</p>
     
     <p>Great news! Your ticket <strong>#{ticket_data.get('ticket_id')}</strong> has been marked as resolved.</p>
     
     <div style="background-color: {EmailConfig.VDH_LIGHT_GRAY}; padding: 15px; border-left: 4px solid #28a745; margin: 20px 0;">
         <p style="margin: 0;"><strong>Ticket Summary:</strong></p>
         <ul style="margin: 10px 0;">
-            <li><strong>Subject:</strong> {html.escape(ticket_data.get('subject', 'N/A'))}</li>
+            <li><strong>Subject:</strong> {html.escape(str(ticket_data.get('subject', 'N/A')))}</li>
             <li><strong>Resolved By:</strong> {html.escape(resolved_by)}</li>
             <li><strong>Resolution Date:</strong> {datetime.now().strftime('%Y-%m-%d %H:%M')}</li>
         </ul>
@@ -529,7 +529,7 @@ def email_ticket_comment_added(ticket_data: Dict[str, Any], comment_text: str, c
     body = f"""
     <h2 style="color: {EmailConfig.VDH_NAVY};">New Comment on Your Ticket</h2>
     
-    <p>Hello {html.escape(ticket_data.get('requester_name', 'there'))},</p>
+    <p>Hello {html.escape(str(ticket_data.get('requester_name', 'there')))},</p>
     
     <p>A new comment has been added to your ticket <strong>#{ticket_data.get('ticket_id')}</strong>.</p>
     
@@ -565,16 +565,16 @@ def email_asset_signed_out(asset_data: Dict[str, Any], recipient_data: Dict[str,
     body = f"""
     <h2 style="color: {EmailConfig.VDH_NAVY};">Asset Sign-Out Confirmation</h2>
     
-    <p>Hello {html.escape(recipient_data.get('name', 'there'))},</p>
+    <p>Hello {html.escape(str(recipient_data.get('name', 'there')))},</p>
     
     <p>This confirms that the following asset has been signed out to you:</p>
     
     <div style="background-color: {EmailConfig.VDH_LIGHT_GRAY}; padding: 15px; border-left: 4px solid {EmailConfig.VDH_ORANGE}; margin: 20px 0;">
         <p style="margin: 0;"><strong>Asset Information:</strong></p>
         <ul style="margin: 10px 0;">
-            <li><strong>Asset Tag:</strong> {html.escape(asset_data.get('asset_tag', 'N/A'))}</li>
-            <li><strong>Description:</strong> {html.escape(asset_data.get('description', 'N/A'))}</li>
-            <li><strong>Serial Number:</strong> {html.escape(asset_data.get('serial_number', 'N/A'))}</li>
+            <li><strong>Asset Tag:</strong> {html.escape(str(asset_data.get('asset_tag', 'N/A')))}</li>
+            <li><strong>Description:</strong> {html.escape(str(asset_data.get('description', 'N/A')))}</li>
+            <li><strong>Serial Number:</strong> {html.escape(str(asset_data.get('serial_number', 'N/A')))}</li>
             <li><strong>Sign-Out Date:</strong> {recipient_data.get('signout_date', datetime.now().strftime('%Y-%m-%d'))}</li>
         </ul>
     </div>
@@ -625,8 +625,8 @@ def email_asset_signed_out(asset_data: Dict[str, Any], recipient_data: Dict[str,
         <p>An asset has been signed out:</p>
         
         <div style="background-color: {EmailConfig.VDH_LIGHT_GRAY}; padding: 15px; margin: 20px 0;">
-            <p style="margin: 0;"><strong>Asset:</strong> {html.escape(asset_data.get('asset_tag', 'N/A'))} - {html.escape(asset_data.get('description', 'N/A'))}</p>
-            <p style="margin: 10px 0 0 0;"><strong>Signed Out To:</strong> {html.escape(recipient_data.get('name', 'N/A'))} ({recipient_data.get('email', 'N/A')})</p>
+            <p style="margin: 0;"><strong>Asset:</strong> {html.escape(str(asset_data.get('asset_tag', 'N/A')))} - {html.escape(str(asset_data.get('description', 'N/A')))}</p>
+            <p style="margin: 10px 0 0 0;"><strong>Signed Out To:</strong> {html.escape(str(recipient_data.get('name', 'N/A')))} ({recipient_data.get('email', 'N/A')})</p>
             <p style="margin: 10px 0 0 0;"><strong>Date:</strong> {recipient_data.get('signout_date', datetime.now().strftime('%Y-%m-%d'))}</p>
         </div>
         """
@@ -649,15 +649,15 @@ def email_asset_return_reminder(asset_data: Dict[str, Any], recipient_data: Dict
     body = f"""
     <h2 style="color: {EmailConfig.VDH_NAVY};">Asset Return Reminder</h2>
     
-    <p>Hello {html.escape(recipient_data.get('name', 'there'))},</p>
+    <p>Hello {html.escape(str(recipient_data.get('name', 'there')))},</p>
     
     <p>This is a friendly reminder that you currently have the following asset signed out:</p>
     
     <div style="background-color: {EmailConfig.VDH_LIGHT_GRAY}; padding: 15px; border-left: 4px solid {EmailConfig.VDH_ORANGE}; margin: 20px 0;">
         <p style="margin: 0;"><strong>Asset Information:</strong></p>
         <ul style="margin: 10px 0;">
-            <li><strong>Asset Tag:</strong> {html.escape(asset_data.get('asset_tag', 'N/A'))}</li>
-            <li><strong>Description:</strong> {html.escape(asset_data.get('description', 'N/A'))}</li>
+            <li><strong>Asset Tag:</strong> {html.escape(str(asset_data.get('asset_tag', 'N/A')))}</li>
+            <li><strong>Description:</strong> {html.escape(str(asset_data.get('description', 'N/A')))}</li>
             <li><strong>Days Out:</strong> {days_out} days</li>
         </ul>
     </div>
@@ -697,17 +697,17 @@ def email_procurement_submitted(procurement_data: Dict[str, Any]) -> bool:
     body = f"""
     <h2 style="color: {EmailConfig.VDH_NAVY};">Procurement Request Submitted</h2>
     
-    <p>Hello {html.escape(procurement_data.get('requester_name', 'there'))},</p>
+    <p>Hello {html.escape(str(procurement_data.get('requester_name', 'there')))},</p>
     
     <p>Your procurement request has been successfully submitted and is pending approval.</p>
     
     <div style="background-color: {EmailConfig.VDH_LIGHT_GRAY}; padding: 15px; border-left: 4px solid {EmailConfig.VDH_ORANGE}; margin: 20px 0;">
         <p style="margin: 0;"><strong>Request Details:</strong></p>
         <ul style="margin: 10px 0;">
-            <li><strong>Request Number:</strong> {html.escape(procurement_data.get('request_number', 'N/A'))}</li>
-            <li><strong>Description:</strong> {html.escape(procurement_data.get('item_description', 'N/A'))}</li>
+            <li><strong>Request Number:</strong> {html.escape(str(procurement_data.get('request_number', 'N/A')))}</li>
+            <li><strong>Description:</strong> {html.escape(str(procurement_data.get('item_description', 'N/A')))}</li>
             <li><strong>Total Amount:</strong> ${procurement_data.get('total_amount', 0):,.2f}</li>
-            <li><strong>VITA Billing Code:</strong> {html.escape(procurement_data.get('vita_billing_code', 'N/A'))}</li>
+            <li><strong>VITA Billing Code:</strong> {html.escape(str(procurement_data.get('vita_billing_code', 'N/A')))}</li>
             <li><strong>Status:</strong> Pending Approval</li>
         </ul>
     </div>
@@ -774,20 +774,20 @@ def email_procurement_needs_approval(procurement_data: Dict[str, Any]) -> bool:
     <div style="background-color: {EmailConfig.VDH_LIGHT_GRAY}; padding: 15px; border-left: 4px solid {EmailConfig.VDH_ORANGE}; margin: 20px 0;">
         <p style="margin: 0;"><strong>Request Information:</strong></p>
         <ul style="margin: 10px 0;">
-            <li><strong>Request #:</strong> {html.escape(procurement_data.get('request_number', 'N/A'))}</li>
-            <li><strong>Requester:</strong> {html.escape(procurement_data.get('requester_name', 'N/A'))} ({procurement_data.get('department', 'N/A')})</li>
-            <li><strong>Item/Service:</strong> {html.escape(procurement_data.get('item_description', 'N/A'))}</li>
+            <li><strong>Request #:</strong> {html.escape(str(procurement_data.get('request_number', 'N/A')))}</li>
+            <li><strong>Requester:</strong> {html.escape(str(procurement_data.get('requester_name', 'N/A')))} ({procurement_data.get('department', 'N/A')})</li>
+            <li><strong>Item/Service:</strong> {html.escape(str(procurement_data.get('item_description', 'N/A')))}</li>
             <li><strong>Quantity:</strong> {procurement_data.get('quantity', 'N/A')}</li>
             <li><strong>Unit Price:</strong> ${procurement_data.get('unit_price', 0):,.2f}</li>
             <li><strong>Total Amount:</strong> <strong>${procurement_data.get('total_amount', 0):,.2f}</strong></li>
-            <li><strong>VITA Code:</strong> {html.escape(procurement_data.get('vita_billing_code', 'N/A'))}</li>
-            <li><strong>Vendor:</strong> {html.escape(procurement_data.get('vendor', 'N/A'))}</li>
+            <li><strong>VITA Code:</strong> {html.escape(str(procurement_data.get('vita_billing_code', 'N/A')))}</li>
+            <li><strong>Vendor:</strong> {html.escape(str(procurement_data.get('vendor', 'N/A')))}</li>
         </ul>
     </div>
     
     <p><strong>Business Justification:</strong></p>
     <div style="background-color: white; border: 1px solid #ddd; padding: 15px; margin: 10px 0;">
-        {html.escape(procurement_data.get('justification', 'No justification provided'))}
+        {html.escape(str(procurement_data.get('justification', 'No justification provided')))}
     </div>
     
     {create_button('Review & Approve Request', proc_url, EmailConfig.VDH_NAVY)}
@@ -823,9 +823,9 @@ def email_procurement_approved(procurement_data: Dict[str, Any], approved_by: st
     body = f"""
     <h2 style="color: #28a745;">✅ Procurement Request Approved</h2>
     
-    <p>Hello {html.escape(procurement_data.get('requester_name', 'there'))},</p>
+    <p>Hello {html.escape(str(procurement_data.get('requester_name', 'there')))},</p>
     
-    <p>Great news! Your procurement request <strong>{html.escape(procurement_data.get('request_number', 'N/A'))}</strong> has been approved.</p>
+    <p>Great news! Your procurement request <strong>{html.escape(str(procurement_data.get('request_number', 'N/A')))}</strong> has been approved.</p>
     
     <div style="background-color: #d4edda; border: 1px solid #28a745; padding: 15px; border-radius: 5px; margin: 20px 0;">
         <p style="margin: 0 0 10px 0;"><strong>✅ Approved By:</strong> {html.escape(approved_by)}</p>
@@ -835,9 +835,9 @@ def email_procurement_approved(procurement_data: Dict[str, Any], approved_by: st
     <div style="background-color: {EmailConfig.VDH_LIGHT_GRAY}; padding: 15px; border-left: 4px solid #28a745; margin: 20px 0;">
         <p style="margin: 0;"><strong>Approved Request:</strong></p>
         <ul style="margin: 10px 0;">
-            <li><strong>Item/Service:</strong> {html.escape(procurement_data.get('item_description', 'N/A'))}</li>
+            <li><strong>Item/Service:</strong> {html.escape(str(procurement_data.get('item_description', 'N/A')))}</li>
             <li><strong>Amount:</strong> ${procurement_data.get('total_amount', 0):,.2f}</li>
-            <li><strong>Vendor:</strong> {html.escape(procurement_data.get('vendor', 'N/A'))}</li>
+            <li><strong>Vendor:</strong> {html.escape(str(procurement_data.get('vendor', 'N/A')))}</li>
         </ul>
     </div>
     """
@@ -885,9 +885,9 @@ def email_procurement_rejected(procurement_data: Dict[str, Any], rejected_by: st
     body = f"""
     <h2 style="color: #dc3545;">❌ Procurement Request Not Approved</h2>
     
-    <p>Hello {html.escape(procurement_data.get('requester_name', 'there'))},</p>
+    <p>Hello {html.escape(str(procurement_data.get('requester_name', 'there')))},</p>
     
-    <p>Your procurement request <strong>{html.escape(procurement_data.get('request_number', 'N/A'))}</strong> could not be approved at this time.</p>
+    <p>Your procurement request <strong>{html.escape(str(procurement_data.get('request_number', 'N/A')))}</strong> could not be approved at this time.</p>
     
     <div style="background-color: #f8d7da; border: 1px solid #dc3545; padding: 15px; border-radius: 5px; margin: 20px 0;">
         <p style="margin: 0 0 10px 0;"><strong>Reviewed By:</strong> {html.escape(rejected_by)}</p>
@@ -938,7 +938,7 @@ def email_password_reset(user_data: Dict[str, Any], reset_token: str) -> bool:
     body = f"""
     <h2 style="color: {EmailConfig.VDH_NAVY};">Password Reset Request</h2>
     
-    <p>Hello {html.escape(user_data.get('name', 'there'))},</p>
+    <p>Hello {html.escape(str(user_data.get('name', 'there')))},</p>
     
     <p>We received a request to reset your password for the VDH Crater Service Center account.</p>
     
@@ -979,14 +979,14 @@ def email_new_user_welcome(user_data: Dict[str, Any], temporary_password: str) -
     body = f"""
     <h2 style="color: {EmailConfig.VDH_NAVY};">Welcome to VDH Crater Service Center!</h2>
     
-    <p>Hello {html.escape(user_data.get('name', 'there'))},</p>
+    <p>Hello {html.escape(str(user_data.get('name', 'there')))},</p>
     
     <p>Your account has been created for the VDH Crater Service Center helpdesk system.</p>
     
     <div style="background-color: {EmailConfig.VDH_LIGHT_GRAY}; padding: 15px; border-left: 4px solid {EmailConfig.VDH_ORANGE}; margin: 20px 0;">
         <p style="margin: 0;"><strong>Your Login Credentials:</strong></p>
         <ul style="margin: 10px 0;">
-            <li><strong>Username:</strong> {html.escape(user_data.get('username', 'N/A'))}</li>
+            <li><strong>Username:</strong> {html.escape(str(user_data.get('username', 'N/A')))}</li>
             <li><strong>Temporary Password:</strong> <code style="background-color: #fff; padding: 2px 6px; border-radius: 3px;">{html.escape(temporary_password)}</code></li>
             <li><strong>Login URL:</strong> <a href="{EmailConfig.APP_URL}">{EmailConfig.APP_URL}</a></li>
         </ul>
@@ -1215,7 +1215,7 @@ def email_vehicle_request_submitted(request_data: Dict[str, Any]) -> bool:
     requester_body = f"""
     <h2 style="color: {EmailConfig.VDH_NAVY};">🚗 Vehicle Request Submitted</h2>
     
-    <p>Hello {html.escape(request_data.get('requester_name', 'there'))},</p>
+    <p>Hello {html.escape(str(request_data.get('requester_name', 'there')))},</p>
     
     <p>Your vehicle request has been successfully submitted and is awaiting fleet administrator approval.</p>
     
@@ -1223,11 +1223,11 @@ def email_vehicle_request_submitted(request_data: Dict[str, Any]) -> bool:
         <p style="margin: 0;"><strong>Request Details:</strong></p>
         <ul style="margin: 10px 0;">
             <li><strong>Request ID:</strong> #{request_data.get('request_id')}</li>
-            <li><strong>Vehicle:</strong> {html.escape(request_data.get('year', ''))} {html.escape(request_data.get('make_model', 'N/A'))}</li>
-            <li><strong>License Plate:</strong> {html.escape(request_data.get('license_plate', 'N/A'))}</li>
+            <li><strong>Vehicle:</strong> {html.escape(str(request_data.get('year', '')))} {html.escape(str(request_data.get('make_model', 'N/A')))}</li>
+            <li><strong>License Plate:</strong> {html.escape(str(request_data.get('license_plate', 'N/A')))}</li>
             <li><strong>Start Date:</strong> {request_data.get('start_date', 'N/A')}</li>
             <li><strong>End Date:</strong> {request_data.get('end_date', 'N/A')}</li>
-            <li><strong>Destination:</strong> {html.escape(request_data.get('destination', 'N/A'))}</li>
+            <li><strong>Destination:</strong> {html.escape(str(request_data.get('destination', 'N/A')))}</li>
         </ul>
     </div>
     
@@ -1280,17 +1280,17 @@ def email_vehicle_request_submitted(request_data: Dict[str, Any]) -> bool:
             <p style="margin: 0;"><strong>Request Information:</strong></p>
             <ul style="margin: 10px 0;">
                 <li><strong>Request ID:</strong> #{request_data.get('request_id')}</li>
-                <li><strong>Requester:</strong> {html.escape(request_data.get('requester_name', 'N/A'))} ({request_data.get('requester_email', 'N/A')})</li>
-                <li><strong>Phone:</strong> {html.escape(request_data.get('requester_phone', 'N/A'))}</li>
-                <li><strong>Department:</strong> {html.escape(request_data.get('department', 'N/A'))}</li>
+                <li><strong>Requester:</strong> {html.escape(str(request_data.get('requester_name', 'N/A')))} ({request_data.get('requester_email', 'N/A')})</li>
+                <li><strong>Phone:</strong> {html.escape(str(request_data.get('requester_phone', 'N/A')))}</li>
+                <li><strong>Department:</strong> {html.escape(str(request_data.get('department', 'N/A')))}</li>
                 <li><strong>Duration:</strong> {duration_days} day(s)</li>
             </ul>
         </div>
         
         <div style="background-color: white; border: 2px solid {EmailConfig.VDH_NAVY}; padding: 15px; margin: 20px 0; border-radius: 5px;">
             <p style="margin: 0;"><strong>🚗 Requested Vehicle:</strong></p>
-            <h3 style="margin: 10px 0; color: {EmailConfig.VDH_NAVY};">{html.escape(request_data.get('year', ''))} {html.escape(request_data.get('make_model', 'N/A'))}</h3>
-            <p style="margin: 0;">License Plate: <strong>{html.escape(request_data.get('license_plate', 'N/A'))}</strong></p>
+            <h3 style="margin: 10px 0; color: {EmailConfig.VDH_NAVY};">{html.escape(str(request_data.get('year', '')))} {html.escape(str(request_data.get('make_model', 'N/A')))}</h3>
+            <p style="margin: 0;">License Plate: <strong>{html.escape(str(request_data.get('license_plate', 'N/A')))}</strong></p>
             <p style="margin: 5px 0 0 0;">Current Mileage: <strong>{request_data.get('current_mileage', 'N/A'):,}</strong> miles</p>
         </div>
         
@@ -1298,13 +1298,13 @@ def email_vehicle_request_submitted(request_data: Dict[str, Any]) -> bool:
         <div style="background-color: {EmailConfig.VDH_LIGHT_GRAY}; padding: 15px; margin: 10px 0;">
             <p style="margin: 0;"><strong>Start Date:</strong> {request_data.get('start_date', 'N/A')}</p>
             <p style="margin: 5px 0;"><strong>End Date:</strong> {request_data.get('end_date', 'N/A')}</p>
-            <p style="margin: 5px 0;"><strong>Destination:</strong> {html.escape(request_data.get('destination', 'N/A'))}</p>
+            <p style="margin: 5px 0;"><strong>Destination:</strong> {html.escape(str(request_data.get('destination', 'N/A')))}</p>
             <p style="margin: 5px 0;"><strong>Estimated Miles:</strong> {request_data.get('estimated_miles', 'N/A')} miles</p>
         </div>
         
         <p><strong>Purpose of Trip:</strong></p>
         <div style="background-color: white; border: 1px solid #ddd; padding: 15px; margin: 10px 0;">
-            {html.escape(request_data.get('purpose', 'No purpose provided'))}
+            {html.escape(str(request_data.get('purpose', 'No purpose provided')))}
         </div>
         
         {create_button('Review & Approve Request', request_url, EmailConfig.VDH_NAVY)}
@@ -1336,7 +1336,7 @@ def email_vehicle_request_approved(request_data: Dict[str, Any], approved_by: st
     body = f"""
     <h2 style="color: #28a745;">✅ Vehicle Request Approved!</h2>
     
-    <p>Hello {html.escape(request_data.get('requester_name', 'there'))},</p>
+    <p>Hello {html.escape(str(request_data.get('requester_name', 'there')))},</p>
     
     <p>Great news! Your vehicle request has been approved and is ready for pickup.</p>
     
@@ -1347,8 +1347,8 @@ def email_vehicle_request_approved(request_data: Dict[str, Any], approved_by: st
     
     <div style="background-color: white; border: 2px solid #28a745; padding: 15px; margin: 20px 0; border-radius: 5px;">
         <p style="margin: 0;"><strong>🚗 Your Assigned Vehicle:</strong></p>
-        <h3 style="margin: 10px 0; color: {EmailConfig.VDH_NAVY};">{html.escape(request_data.get('year', ''))} {html.escape(request_data.get('make_model', 'N/A'))}</h3>
-        <p style="margin: 0;">License Plate: <strong>{html.escape(request_data.get('license_plate', 'N/A'))}</strong></p>
+        <h3 style="margin: 10px 0; color: {EmailConfig.VDH_NAVY};">{html.escape(str(request_data.get('year', '')))} {html.escape(str(request_data.get('make_model', 'N/A')))}</h3>
+        <p style="margin: 0;">License Plate: <strong>{html.escape(str(request_data.get('license_plate', 'N/A')))}</strong></p>
         <p style="margin: 5px 0 0 0;">Current Mileage: <strong>{request_data.get('current_mileage', 'N/A'):,}</strong> miles</p>
     </div>
     
@@ -1418,7 +1418,7 @@ def email_vehicle_request_rejected(request_data: Dict[str, Any], rejected_by: st
     body = f"""
     <h2 style="color: #dc3545;">Vehicle Request - Unable to Approve</h2>
     
-    <p>Hello {html.escape(request_data.get('requester_name', 'there'))},</p>
+    <p>Hello {html.escape(str(request_data.get('requester_name', 'there')))},</p>
     
     <p>We regret to inform you that your vehicle request could not be approved at this time.</p>
     
@@ -1431,7 +1431,7 @@ def email_vehicle_request_rejected(request_data: Dict[str, Any], rejected_by: st
         <p style="margin: 0;"><strong>Request Details:</strong></p>
         <ul style="margin: 10px 0;">
             <li><strong>Request ID:</strong> #{request_data.get('request_id')}</li>
-            <li><strong>Vehicle:</strong> {html.escape(request_data.get('year', ''))} {html.escape(request_data.get('make_model', 'N/A'))}</li>
+            <li><strong>Vehicle:</strong> {html.escape(str(request_data.get('year', '')))} {html.escape(str(request_data.get('make_model', 'N/A')))}</li>
             <li><strong>Dates:</strong> {request_data.get('start_date', 'N/A')} to {request_data.get('end_date', 'N/A')}</li>
         </ul>
     </div>
@@ -1498,7 +1498,7 @@ def email_vehicle_unavailable(request_data: Dict[str, Any], reason: str = "maint
     body = f"""
     <h2 style="color: {EmailConfig.VDH_ORANGE};">{reason_info['icon']} {reason_info['title']}</h2>
     
-    <p>Hello {html.escape(request_data.get('requester_name', 'there'))},</p>
+    <p>Hello {html.escape(str(request_data.get('requester_name', 'there')))},</p>
     
     <p>We need to inform you of an important change to your vehicle reservation.</p>
     
@@ -1511,7 +1511,7 @@ def email_vehicle_unavailable(request_data: Dict[str, Any], reason: str = "maint
         <p style="margin: 0;"><strong>Your Reservation:</strong></p>
         <ul style="margin: 10px 0;">
             <li><strong>Request ID:</strong> #{request_data.get('request_id')}</li>
-            <li><strong>Original Vehicle:</strong> {html.escape(request_data.get('year', ''))} {html.escape(request_data.get('make_model', 'N/A'))}</li>
+            <li><strong>Original Vehicle:</strong> {html.escape(str(request_data.get('year', '')))} {html.escape(str(request_data.get('make_model', 'N/A')))}</li>
             <li><strong>Dates:</strong> {request_data.get('start_date', 'N/A')} to {request_data.get('end_date', 'N/A')}</li>
         </ul>
     </div>
@@ -1562,8 +1562,8 @@ def email_vehicle_unavailable(request_data: Dict[str, Any], reason: str = "maint
             <p style="margin: 0;"><strong>Affected Reservation:</strong></p>
             <ul style="margin: 10px 0;">
                 <li><strong>Request ID:</strong> #{request_data.get('request_id')}</li>
-                <li><strong>Driver:</strong> {html.escape(request_data.get('requester_name', 'N/A'))}</li>
-                <li><strong>Vehicle:</strong> {html.escape(request_data.get('make_model', 'N/A'))}</li>
+                <li><strong>Driver:</strong> {html.escape(str(request_data.get('requester_name', 'N/A')))}</li>
+                <li><strong>Vehicle:</strong> {html.escape(str(request_data.get('make_model', 'N/A')))}</li>
                 <li><strong>Reason:</strong> {reason_info['title']}</li>
             </ul>
         </div>
@@ -1594,8 +1594,8 @@ def email_trip_started(trip_data: Dict[str, Any]) -> bool:
         <p style="margin: 0;"><strong>Trip Information:</strong></p>
         <ul style="margin: 10px 0;">
             <li><strong>Trip ID:</strong> #{trip_data.get('trip_id')}</li>
-            <li><strong>Driver:</strong> {html.escape(trip_data.get('driver_name', 'N/A'))} ({trip_data.get('driver_email', 'N/A')})</li>
-            <li><strong>Department:</strong> {html.escape(trip_data.get('department', 'N/A'))}</li>
+            <li><strong>Driver:</strong> {html.escape(str(trip_data.get('driver_name', 'N/A')))} ({trip_data.get('driver_email', 'N/A')})</li>
+            <li><strong>Department:</strong> {html.escape(str(trip_data.get('department', 'N/A')))}</li>
             <li><strong>Start Time:</strong> {trip_data.get('start_datetime', datetime.now().strftime('%Y-%m-%d %H:%M'))}</li>
         </ul>
     </div>
@@ -1603,16 +1603,16 @@ def email_trip_started(trip_data: Dict[str, Any]) -> bool:
     <div style="background-color: white; border: 2px solid {EmailConfig.VDH_NAVY}; padding: 15px; margin: 20px 0; border-radius: 5px;">
         <p style="margin: 0;"><strong>🚗 Vehicle:</strong></p>
         <p style="margin: 10px 0 0 0;">
-            <strong>{html.escape(trip_data.get('make_model', 'N/A'))}</strong><br>
-            License: {html.escape(trip_data.get('license_plate', 'N/A'))}<br>
+            <strong>{html.escape(str(trip_data.get('make_model', 'N/A')))}</strong><br>
+            License: {html.escape(str(trip_data.get('license_plate', 'N/A')))}<br>
             Starting Mileage: <strong>{trip_data.get('start_mileage', 0):,}</strong> miles
         </p>
     </div>
     
     <p><strong>Trip Details:</strong></p>
     <div style="background-color: {EmailConfig.VDH_LIGHT_GRAY}; padding: 15px; margin: 10px 0;">
-        <p style="margin: 0;"><strong>From:</strong> {html.escape(trip_data.get('start_location', 'N/A'))}</p>
-        <p style="margin: 5px 0 0 0;"><strong>Notes:</strong> {html.escape(trip_data.get('notes', 'No notes provided'))}</p>
+        <p style="margin: 0;"><strong>From:</strong> {html.escape(str(trip_data.get('start_location', 'N/A')))}</p>
+        <p style="margin: 5px 0 0 0;"><strong>Notes:</strong> {html.escape(str(trip_data.get('notes', 'No notes provided')))}</p>
     </div>
     
     <p style="margin-top: 20px; font-size: 12px; color: #666;">
@@ -1648,7 +1648,7 @@ def email_trip_completed(trip_data: Dict[str, Any]) -> bool:
     driver_body = f"""
     <h2 style="color: #28a745;">🏁 Trip Completed - Thank You!</h2>
     
-    <p>Hello {html.escape(trip_data.get('driver_name', 'there'))},</p>
+    <p>Hello {html.escape(str(trip_data.get('driver_name', 'there')))},</p>
     
     <p>Thank you for using VDH Fleet Services. Your trip has been successfully logged and the vehicle has been returned.</p>
     
@@ -1660,8 +1660,8 @@ def email_trip_completed(trip_data: Dict[str, Any]) -> bool:
     <div style="background-color: {EmailConfig.VDH_LIGHT_GRAY}; padding: 15px; margin: 20px 0;">
         <p style="margin: 0;"><strong>🚗 Vehicle:</strong></p>
         <p style="margin: 10px 0 0 0;">
-            <strong>{html.escape(trip_data.get('make_model', 'N/A'))}</strong><br>
-            License Plate: {html.escape(trip_data.get('license_plate', 'N/A'))}
+            <strong>{html.escape(str(trip_data.get('make_model', 'N/A')))}</strong><br>
+            License Plate: {html.escape(str(trip_data.get('license_plate', 'N/A')))}
         </p>
     </div>
     
@@ -1671,11 +1671,11 @@ def email_trip_completed(trip_data: Dict[str, Any]) -> bool:
         <table style="width: 100%; border-collapse: collapse;">
             <tr style="border-bottom: 1px solid #ddd;">
                 <td style="padding: 10px; font-weight: bold;">Start Location:</td>
-                <td style="padding: 10px;">{html.escape(trip_data.get('start_location', 'N/A'))}</td>
+                <td style="padding: 10px;">{html.escape(str(trip_data.get('start_location', 'N/A')))}</td>
             </tr>
             <tr style="border-bottom: 1px solid #ddd;">
                 <td style="padding: 10px; font-weight: bold;">End Location:</td>
-                <td style="padding: 10px;">{html.escape(trip_data.get('end_location', 'N/A'))}</td>
+                <td style="padding: 10px;">{html.escape(str(trip_data.get('end_location', 'N/A')))}</td>
             </tr>
             <tr style="border-bottom: 1px solid #ddd;">
                 <td style="padding: 10px; font-weight: bold;">Start Mileage:</td>
@@ -1738,8 +1738,8 @@ def email_trip_completed(trip_data: Dict[str, Any]) -> bool:
             <p style="margin: 0;"><strong>Trip Summary:</strong></p>
             <ul style="margin: 10px 0;">
                 <li><strong>Trip ID:</strong> #{trip_data.get('trip_id')}</li>
-                <li><strong>Driver:</strong> {html.escape(trip_data.get('driver_name', 'N/A'))} ({trip_data.get('driver_email', 'N/A')})</li>
-                <li><strong>Department:</strong> {html.escape(trip_data.get('department', 'N/A'))}</li>
+                <li><strong>Driver:</strong> {html.escape(str(trip_data.get('driver_name', 'N/A')))} ({trip_data.get('driver_email', 'N/A')})</li>
+                <li><strong>Department:</strong> {html.escape(str(trip_data.get('department', 'N/A')))}</li>
                 <li><strong>Duration:</strong> {hours:.1f} hours</li>
             </ul>
         </div>
@@ -1747,8 +1747,8 @@ def email_trip_completed(trip_data: Dict[str, Any]) -> bool:
         <div style="background-color: white; border: 2px solid {EmailConfig.VDH_NAVY}; padding: 15px; margin: 20px 0; border-radius: 5px;">
             <p style="margin: 0;"><strong>🚗 Vehicle:</strong></p>
             <p style="margin: 10px 0 0 0;">
-                <strong>{html.escape(trip_data.get('make_model', 'N/A'))}</strong><br>
-                License: {html.escape(trip_data.get('license_plate', 'N/A'))}<br>
+                <strong>{html.escape(str(trip_data.get('make_model', 'N/A')))}</strong><br>
+                License: {html.escape(str(trip_data.get('license_plate', 'N/A')))}<br>
                 <strong>Miles Driven:</strong> <span style="color: {EmailConfig.VDH_ORANGE}; font-weight: bold;">{miles_driven:,} miles</span><br>
                 <strong>New Mileage:</strong> {trip_data.get('end_mileage', 0):,} miles
             </p>
@@ -1756,8 +1756,8 @@ def email_trip_completed(trip_data: Dict[str, Any]) -> bool:
         
         <p><strong>Route:</strong></p>
         <div style="background-color: {EmailConfig.VDH_LIGHT_GRAY}; padding: 15px; margin: 10px 0;">
-            <p style="margin: 0;">From: <strong>{html.escape(trip_data.get('start_location', 'N/A'))}</strong></p>
-            <p style="margin: 5px 0 0 0;">To: <strong>{html.escape(trip_data.get('end_location', 'N/A'))}</strong></p>
+            <p style="margin: 0;">From: <strong>{html.escape(str(trip_data.get('start_location', 'N/A')))}</strong></p>
+            <p style="margin: 5px 0 0 0;">To: <strong>{html.escape(str(trip_data.get('end_location', 'N/A')))}</strong></p>
         </div>
         
         <div style="background-color: #fff3cd; border: 1px solid #ffc107; padding: 15px; margin: 20px 0; border-radius: 5px;">
@@ -1835,9 +1835,9 @@ def email_vehicle_service_needed(vehicle_data: Dict[str, Any], urgency: str = "d
     
     <div style="background-color: white; border: 2px solid {EmailConfig.VDH_NAVY}; padding: 15px; margin: 20px 0; border-radius: 5px;">
         <p style="margin: 0;"><strong>🚗 Vehicle Information:</strong></p>
-        <h3 style="margin: 10px 0; color: {EmailConfig.VDH_NAVY};">{html.escape(vehicle_data.get('year', ''))} {html.escape(vehicle_data.get('make_model', 'N/A'))}</h3>
+        <h3 style="margin: 10px 0; color: {EmailConfig.VDH_NAVY};">{html.escape(str(vehicle_data.get('year', '')))} {html.escape(str(vehicle_data.get('make_model', 'N/A')))}</h3>
         <p style="margin: 0;">
-            <strong>License Plate:</strong> {html.escape(vehicle_data.get('license_plate', 'N/A'))}<br>
+            <strong>License Plate:</strong> {html.escape(str(vehicle_data.get('license_plate', 'N/A')))}<br>
             <strong>Current Mileage:</strong> {current_mileage:,} miles<br>
             <strong>Miles Until Service:</strong> <span style="color: {config['color']}; font-weight: bold;">{miles_until_service} miles</span>
         </p>
@@ -1916,10 +1916,10 @@ def email_vehicle_idle_alert(vehicle_data: Dict[str, Any], days_idle: int) -> bo
     
     <div style="background-color: white; border: 2px solid {EmailConfig.VDH_NAVY}; padding: 15px; margin: 20px 0; border-radius: 5px;">
         <p style="margin: 0;"><strong>🚗 Vehicle Information:</strong></p>
-        <h3 style="margin: 10px 0; color: {EmailConfig.VDH_NAVY};">{html.escape(vehicle_data.get('year', ''))} {html.escape(vehicle_data.get('make_model', 'N/A'))}</h3>
+        <h3 style="margin: 10px 0; color: {EmailConfig.VDH_NAVY};">{html.escape(str(vehicle_data.get('year', '')))} {html.escape(str(vehicle_data.get('make_model', 'N/A')))}</h3>
         <p style="margin: 0;">
-            <strong>License Plate:</strong> {html.escape(vehicle_data.get('license_plate', 'N/A'))}<br>
-            <strong>Current Status:</strong> {html.escape(vehicle_data.get('status', 'Available'))}<br>
+            <strong>License Plate:</strong> {html.escape(str(vehicle_data.get('license_plate', 'N/A')))}<br>
+            <strong>Current Status:</strong> {html.escape(str(vehicle_data.get('status', 'Available')))}<br>
             <strong>Current Mileage:</strong> {vehicle_data.get('current_mileage', 0):,} miles
         </p>
     </div>
