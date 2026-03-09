@@ -60,7 +60,8 @@ try:
     )
     HAS_EMAIL_AUTOMATION = True
 except ImportError as e:
-    logger.warning(f"Email automation not available: {e}")
+    # Logger not defined yet, use print
+    print(f"⚠️ Email automation not available: {e}")
     HAS_EMAIL_AUTOMATION = False
 
 # App colors
