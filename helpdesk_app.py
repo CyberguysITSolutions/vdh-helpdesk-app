@@ -731,54 +731,81 @@ def render_helpdesk_ticket_public_form():
     st.title("Submit Helpdesk Ticket")
     st.markdown("Use this form to submit a public helpdesk ticket. Provide contact info and a description of your issue.")
     
+    # Email lookup OUTSIDE the form (buttons not allowed inside forms)
+    profile = None
+    email_default = ""
+    name_default = ""
+    phone_default = ""
+    department_default = ""
+    location_default = ""
+    
+    if HAS_USER_PROFILES and DB_AVAILABLE:
+        st.write("### 👤 Your Information")
+        st.info("💡 Enter your email and click 🔍 Lookup to auto-fill your information below")
+        
+        col1, col2 = st.columns([3, 1])
+        with col1:
+            lookup_email = st.text_input(
+                "📧 Email Address",
+                key="helpdesk_lookup_email",
+                placeholder="user@vdh.virginia.gov"
+            )
+        with col2:
+            st.write("")  # Spacer
+            st.write("")  # Spacer
+            if st.button("🔍 Lookup", key="helpdesk_lookup_btn"):
+                if lookup_email:
+                    profile_result = get_user_profile_by_email(lookup_email, execute_query)
+                    if profile_result:
+                        st.session_state['helpdesk_profile'] = profile_result
+                        st.session_state['helpdesk_email'] = lookup_email
+                        st.success(f"✅ Found profile for {profile_result.get('full_name', 'User')}")
+                        st.rerun()
+                    else:
+                        st.session_state['helpdesk_profile'] = None
+                        st.session_state['helpdesk_email'] = lookup_email
+                        st.info("👤 New user - please fill in your information in the form below")
+        
+        # Get profile from session state
+        if 'helpdesk_profile' in st.session_state and st.session_state['helpdesk_profile']:
+            profile = st.session_state['helpdesk_profile']
+            email_default = st.session_state.get('helpdesk_email', '')
+            name_default = profile.get('full_name', '')
+            phone_default = profile.get('phone', '')
+            department_default = profile.get('department', '')
+            location_default = profile.get('location', '')
+        elif 'helpdesk_email' in st.session_state:
+            email_default = st.session_state['helpdesk_email']
+    
     with st.form("public_helpdesk_form", clear_on_submit=False):
-        # Email lookup with autofill
+        # User information fields
         if HAS_USER_PROFILES and DB_AVAILABLE:
-            st.write("### 👤 Your Information")
-            st.info("💡 Enter your email and click 🔍 Lookup to auto-fill your information")
-            
-            email, profile = render_email_lookup_widget(
-                email_key="helpdesk_ticket_email",
-                label="📧 Email Address *",
-                execute_query_func=execute_query
-            )
-            
-            # Render autofill form fields
-            form_data = render_autofill_form_fields(
-                profile=profile,
-                name_key="helpdesk_ticket_name",
-                phone_key="helpdesk_ticket_phone",
-                department_key="helpdesk_ticket_dept",
-                location_key="helpdesk_ticket_location",
-                show_department=True,
-                show_location=True
-            )
-            
-            name = form_data['full_name']
-            phone = form_data['phone']
-            department = form_data['department']
-            location = form_data['location']
-            
+            st.write("### 📝 Contact Details")
         else:
-            # Fallback to original form fields if user profiles not available
-            name = st.text_input("Full name *", "")
-            email = st.text_input("Email *", "")
-            phone = st.text_input("Phone (optional)", "")
-            
-            # Add location dropdown
-            location = st.selectbox("Location *", [
-                "",  # Empty default to force selection
-                "Petersburg Health Department",
-                "Dinwiddie County Health Department",
-                "Sussex County Health Department",
-                "Surry County Health Department",
-                "Prince George Health Department",
-                "Hopewell Health Department",
-                "Greensville/Emporia Health Department",
-                "Other/Not Listed"
-            ])
-            
-            department = st.text_input("Department (optional)", "")
+            st.write("### 👤 Your Information")
+        
+        name = st.text_input("Full name *", value=name_default, key="helpdesk_form_name")
+        email = st.text_input("Email *", value=email_default, key="helpdesk_form_email")
+        phone = st.text_input("Phone (optional)", value=phone_default, key="helpdesk_form_phone")
+        
+        # Add location dropdown
+        location_options = [
+            "",  # Empty default to force selection
+            "Petersburg Health Department",
+            "Dinwiddie County Health Department",
+            "Sussex County Health Department",
+            "Surry County Health Department",
+            "Prince George Health Department",
+            "Hopewell Health Department",
+            "Greensville/Emporia Health Department",
+            "Other/Not Listed"
+        ]
+        location_index = 0
+        if location_default and location_default in location_options:
+            location_index = location_options.index(location_default)
+        location = st.selectbox("Location *", location_options, index=location_index, key="helpdesk_form_location")
+        
+        department = st.text_input("Department (optional)", value=department_default, key="helpdesk_form_dept")
         
         # Rest of form (same for both paths)
         st.write("### 🎫 Ticket Details")
@@ -1062,48 +1089,79 @@ def render_request_vehicle_public_form():
             
             st.markdown("---")
             
-            # Request form
-            with st.form("vehicle_request_form"):
-                st.write("### Your Information")
+            # Email lookup OUTSIDE the form (buttons not allowed inside forms)
+            profile = None
+            requester_email_default = ""
+            requester_name_default = ""
+            requester_phone_default = ""
+            
+            if HAS_USER_PROFILES and DB_AVAILABLE:
+                st.write("### 👤 Your Information")
+                st.info("💡 Enter your email and click 🔍 Lookup to auto-fill your information below")
                 
-                # Email lookup with autofill
-                if HAS_USER_PROFILES:
-                    st.info("💡 Enter your email and click 🔍 Lookup to auto-fill your information")
-                    
-                    requester_email, profile = render_email_lookup_widget(
-                        email_key="vehicle_req_email",
-                        label="📧 Email Address *",
-                        execute_query_func=execute_query
+                col1, col2 = st.columns([3, 1])
+                with col1:
+                    lookup_email = st.text_input(
+                        "📧 Email Address",
+                        key="vehicle_lookup_email",
+                        placeholder="user@vdh.virginia.gov"
                     )
-                    
-                    # Render autofill form fields (without department, custom location)
-                    col1, col2 = st.columns(2)
-                    with col1:
-                        default_name = profile.get('full_name', '') if profile else ''
-                        requester_name = st.text_input("👤 Full Name *", value=default_name, placeholder="John Doe")
-                    with col2:
-                        default_phone = profile.get('phone', '') if profile else ''
-                        requester_phone = st.text_input("📞 Phone Number *", value=default_phone, placeholder="804-555-1234")
-                    
+                with col2:
+                    st.write("")  # Spacer
+                    st.write("")  # Spacer
+                    if st.button("🔍 Lookup", key="vehicle_lookup_btn"):
+                        if lookup_email:
+                            profile_result = get_user_profile_by_email(lookup_email, execute_query)
+                            if profile_result:
+                                st.session_state['vehicle_profile'] = profile_result
+                                st.session_state['vehicle_email'] = lookup_email
+                                st.success(f"✅ Found profile for {profile_result.get('full_name', 'User')}")
+                                st.rerun()
+                            else:
+                                st.session_state['vehicle_profile'] = None
+                                st.session_state['vehicle_email'] = lookup_email
+                                st.info("👤 New user - please fill in your information in the form below")
+                
+                # Get profile from session state
+                if 'vehicle_profile' in st.session_state and st.session_state['vehicle_profile']:
+                    profile = st.session_state['vehicle_profile']
+                    requester_email_default = st.session_state.get('vehicle_email', '')
+                    requester_name_default = profile.get('full_name', '')
+                    requester_phone_default = profile.get('phone', '')
+                elif 'vehicle_email' in st.session_state:
+                    requester_email_default = st.session_state['vehicle_email']
+            
+            # Request form (no buttons allowed except submit button)
+            with st.form("vehicle_request_form"):
+                if not HAS_USER_PROFILES or not DB_AVAILABLE:
+                    st.write("### Your Information")
+                
+                col1, col2 = st.columns(2)
+                with col1:
+                    requester_name = st.text_input(
+                        "👤 Full Name *", 
+                        value=requester_name_default,
+                        placeholder="John Doe",
+                        key="vehicle_form_name"
+                    )
+                    requester_email = st.text_input(
+                        "📧 Email *", 
+                        value=requester_email_default,
+                        placeholder="john.doe@vdh.virginia.gov",
+                        key="vehicle_form_email"
+                    )
+                with col2:
+                    requester_phone = st.text_input(
+                        "📞 Phone Number *", 
+                        value=requester_phone_default,
+                        placeholder="804-555-1234",
+                        key="vehicle_form_phone"
+                    )
                     requester_location = st.selectbox("📍 Your Location *", [
                         "", "Crater", "Dinwiddie County", "Greensville/Emporia", 
                         "Surry County", "Prince George", "Sussex County", 
                         "Hopewell", "Petersburg"
-                    ])
-                    
-                else:
-                    # Fallback to original form
-                    col1, col2 = st.columns(2)
-                    with col1:
-                        requester_name = st.text_input("Full Name *", placeholder="John Doe")
-                        requester_email = st.text_input("Email *", placeholder="john.doe@vdh.virginia.gov")
-                    with col2:
-                        requester_phone = st.text_input("Phone Number", placeholder="804-555-1234")
-                        requester_location = st.selectbox("Your Location *", [
-                            "", "Crater", "Dinwiddie County", "Greensville/Emporia", 
-                            "Surry County", "Prince George", "Sussex County", 
-                            "Hopewell", "Petersburg"
-                        ])
+                    ], key="vehicle_form_location")
                 
                 st.write("### Trip Details")
                 
@@ -1288,38 +1346,70 @@ def render_procurement_request_public_form():
     st.title("Public Procurement Request")
     st.markdown("Submit a procurement request using this public form.")
     
+    # Email lookup OUTSIDE the form (buttons not allowed inside forms)
+    profile = None
+    email_default = ""
+    requester_default = ""
+    department_default = ""
+    location_default = ""
+    
+    if HAS_USER_PROFILES and DB_AVAILABLE:
+        st.write("### 👤 Requester Information")
+        st.info("💡 Enter your email and click 🔍 Lookup to auto-fill your information below")
+        
+        col1, col2 = st.columns([3, 1])
+        with col1:
+            lookup_email = st.text_input(
+                "📧 Email Address",
+                key="procurement_lookup_email",
+                placeholder="user@vdh.virginia.gov"
+            )
+        with col2:
+            st.write("")  # Spacer
+            st.write("")  # Spacer
+            if st.button("🔍 Lookup", key="procurement_lookup_btn"):
+                if lookup_email:
+                    profile_result = get_user_profile_by_email(lookup_email, execute_query)
+                    if profile_result:
+                        st.session_state['procurement_profile'] = profile_result
+                        st.session_state['procurement_email'] = lookup_email
+                        st.success(f"✅ Found profile for {profile_result.get('full_name', 'User')}")
+                        st.rerun()
+                    else:
+                        st.session_state['procurement_profile'] = None
+                        st.session_state['procurement_email'] = lookup_email
+                        st.info("👤 New user - please fill in your information in the form below")
+        
+        # Get profile from session state
+        if 'procurement_profile' in st.session_state and st.session_state['procurement_profile']:
+            profile = st.session_state['procurement_profile']
+            email_default = st.session_state.get('procurement_email', '')
+            requester_default = profile.get('full_name', '')
+            department_default = profile.get('department', '')
+            location_default = profile.get('location', '')
+        elif 'procurement_email' in st.session_state:
+            email_default = st.session_state['procurement_email']
+    
     with st.form("public_procurement_form", clear_on_submit=False):
-        # Email lookup with autofill
+        # User information fields
         if HAS_USER_PROFILES and DB_AVAILABLE:
-            st.write("### 👤 Requester Information")
-            st.info("💡 Enter your email and click 🔍 Lookup to auto-fill your information")
-            
-            email, profile = render_email_lookup_widget(
-                email_key="procurement_email",
-                label="📧 Email Address *",
-                execute_query_func=execute_query
-            )
-            
-            # Render autofill form fields
-            form_data = render_autofill_form_fields(
-                profile=profile,
-                name_key="procurement_name",
-                phone_key="procurement_phone",
-                department_key="procurement_dept",
-                location_key="procurement_location",
-                show_department=True,
-                show_location=True
-            )
-            
-            requester = form_data['full_name']
-            department = form_data['department']
-            location = form_data['location']
-            
+            st.write("### 📝 Contact Details")
         else:
-            # Fallback to original form
-            requester = st.text_input("Requester name", "")
-            email = st.text_input("Requester email", "")
-            location = st.selectbox("Location", STANDARD_LOCATIONS)
+            st.write("### 👤 Requester Information")
+        
+        requester = st.text_input("Requester name *", value=requester_default, key="procurement_form_name")
+        email = st.text_input("Requester email *", value=email_default, key="procurement_form_email")
+        
+        # Location dropdown
+        location_options = STANDARD_LOCATIONS
+        location_index = 0
+        if location_default and location_default in location_options:
+            location_index = location_options.index(location_default)
+        location = st.selectbox("Location *", location_options, index=location_index, key="procurement_form_location")
+        
+        if HAS_USER_PROFILES and DB_AVAILABLE and department_default:
+            department = st.text_input("Department (optional)", value=department_default, key="procurement_form_dept")
+        else:
             department = ""
         
         # Procurement details (same for both paths)
