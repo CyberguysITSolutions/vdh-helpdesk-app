@@ -45,6 +45,24 @@ try:
 except Exception:
     HAS_PLOTLY = False
 
+# Email automation imports
+try:
+    from email_automation import (
+        email_vehicle_request_submitted,
+        email_vehicle_request_approved,
+        email_vehicle_request_rejected,
+        email_vehicle_unavailable,
+        email_trip_started,
+        email_trip_completed,
+        email_vehicle_service_needed,
+        email_vehicle_idle_alert,
+        email_weekly_fleet_summary
+    )
+    HAS_EMAIL_AUTOMATION = True
+except ImportError as e:
+    logger.warning(f"Email automation not available: {e}")
+    HAS_EMAIL_AUTOMATION = False
+
 # App colors
 VDH_NAVY = "#002855"
 VDH_ORANGE = "#FF6B35"
@@ -1052,6 +1070,11 @@ def render_request_vehicle_public_form():
                         success, error = execute_non_query(insert_query, params)
                         
                         if success:
+                            # Get the new request ID
+                            request_id_query = "SELECT MAX(request_id) as request_id FROM dbo.Vehicle_Requests"
+                            request_id_result, _ = execute_query(request_id_query)
+                            new_request_id = request_id_result.iloc[0]['request_id'] if request_id_result is not None and not request_id_result.empty else None
+                            
                             # Create notification
                             notif_query = """
                                 INSERT INTO dbo.Notifications (notification_type, reference_id, message, created_by)
@@ -1060,12 +1083,36 @@ def render_request_vehicle_public_form():
                             message = f"New vehicle request from {requester_name} for {vehicle['year']} {vehicle['make_model']}"
                             execute_non_query(notif_query, (message, requester_name))
                             
-                            # Send email notification
-                            send_email_notification(
-                                "admin@vdh.virginia.gov",
-                                "New Vehicle Request",
-                                f"New vehicle request from {requester_name}\n\nVehicle: {vehicle['year']} {vehicle['make_model']}\nDates: {start_date} to {end_date}"
-                            )
+                            # Send comprehensive email notifications (requester + fleet admin)
+                            if HAS_EMAIL_AUTOMATION and new_request_id:
+                                try:
+                                    request_data = {
+                                        'request_id': new_request_id,
+                                        'requester_name': requester_name,
+                                        'requester_email': requester_email,
+                                        'requester_phone': requester_phone,
+                                        'department': requester_location,
+                                        'year': vehicle['year'],
+                                        'make_model': vehicle['make_model'],
+                                        'license_plate': vehicle['license_plate'],
+                                        'current_mileage': vehicle.get('current_mileage', 0),
+                                        'start_date': str(start_date),
+                                        'end_date': str(end_date),
+                                        'destination': requester_location,
+                                        'estimated_miles': estimated_miles,
+                                        'purpose': purpose
+                                    }
+                                    email_vehicle_request_submitted(request_data)
+                                    logger.info(f"Vehicle request emails sent for request #{new_request_id}")
+                                except Exception as e:
+                                    logger.error(f"Failed to send vehicle request emails: {e}")
+                            else:
+                                # Fallback to legacy email notification
+                                send_email_notification(
+                                    "admin@vdh.virginia.gov",
+                                    "New Vehicle Request",
+                                    f"New vehicle request from {requester_name}\n\nVehicle: {vehicle['year']} {vehicle['make_model']}\nDates: {start_date} to {end_date}"
+                                )
                             
                             st.success("✅ **Vehicle request submitted successfully!**")
                             st.info("📧 A confirmation email has been sent. You will be notified once your request is reviewed.")
@@ -1287,6 +1334,40 @@ def render_driver_trip_entry_public_form():
                         if insert_err or not result:
                             st.error(f"❌ Error starting trip: {insert_err}")
                         else:
+                            # Get the new trip ID
+                            trip_id_query = "SELECT MAX(trip_id) as trip_id FROM dbo.vehicle_trips"
+                            trip_id_result, _ = execute_query(trip_id_query)
+                            new_trip_id = trip_id_result.iloc[0]['trip_id'] if trip_id_result is not None and not trip_id_result.empty else None
+                            
+                            # Get vehicle details for email
+                            if HAS_EMAIL_AUTOMATION and new_trip_id:
+                                try:
+                                    vehicle_query = f"SELECT year, make_model, license_plate FROM dbo.vehicles WHERE id = {vehicle_id}"
+                                    vehicle_result, _ = execute_query(vehicle_query)
+                                    
+                                    if vehicle_result is not None and not vehicle_result.empty:
+                                        vehicle_info = vehicle_result.iloc[0]
+                                        
+                                        # Prepare trip data for email
+                                        trip_data = {
+                                            'trip_id': new_trip_id,
+                                            'driver_name': driver_name,
+                                            'driver_email': driver_email,
+                                            'department': department,
+                                            'make_model': vehicle_info['make_model'],
+                                            'license_plate': vehicle_info['license_plate'],
+                                            'start_location': start_location,
+                                            'start_mileage': start_mileage,
+                                            'start_datetime': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                                            'notes': trip_notes or 'No notes'
+                                        }
+                                        
+                                        # Send trip started notification to fleet admin
+                                        email_trip_started(trip_data)
+                                        logger.info(f"Trip started email sent for trip #{new_trip_id}")
+                                except Exception as e:
+                                    logger.error(f"Failed to send trip started email: {e}")
+                            
                             st.success("✅ Trip started successfully!")
                             st.balloons()
                             time.sleep(1)
@@ -1368,7 +1449,54 @@ def render_driver_trip_entry_public_form():
                                         (int(trip_id), photo_bytes, photo.name, len(photo_bytes))
                                     )
                             
-                            st.success(f"✅ Trip completed! You drove {miles_driven} miles.")
+                            # Update vehicle status to Available
+                            update_vehicle_query = """
+                                UPDATE dbo.vehicles
+                                SET status = 'Available',
+                                    current_mileage = ?,
+                                    current_driver = NULL,
+                                    updated_at = GETDATE()
+                                WHERE id = (SELECT vehicle_id FROM dbo.vehicle_trips WHERE trip_id = ?)
+                            """
+                            execute_non_query(update_vehicle_query, (int(end_mileage), int(trip_id)))
+                            
+                            # Get vehicle details for email
+                            if HAS_EMAIL_AUTOMATION:
+                                try:
+                                    vehicle_query = """
+                                        SELECT v.year, v.make_model, v.license_plate, vt.vehicle_id
+                                        FROM dbo.vehicles v
+                                        INNER JOIN dbo.vehicle_trips vt ON v.id = vt.vehicle_id
+                                        WHERE vt.trip_id = ?
+                                    """
+                                    vehicle_result, _ = execute_query(vehicle_query, (int(trip_id),))
+                                    
+                                    if vehicle_result is not None and not vehicle_result.empty:
+                                        vehicle_info = vehicle_result.iloc[0]
+                                        
+                                        # Prepare trip data for email
+                                        trip_data = {
+                                            'trip_id': trip_id,
+                                            'driver_name': start_info['driver_name'],
+                                            'driver_email': start_info['driver_email'],
+                                            'department': start_info['department'],
+                                            'make_model': vehicle_info['make_model'],
+                                            'license_plate': vehicle_info['license_plate'],
+                                            'start_location': start_info['start_location'],
+                                            'end_location': end_location,
+                                            'start_mileage': int(start_info['start_mileage']),
+                                            'end_mileage': int(end_mileage),
+                                            'start_datetime': str(start_info['start_datetime']),
+                                            'end_datetime': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                                        }
+                                        
+                                        # Send trip completed emails
+                                        email_trip_completed(trip_data)
+                                        logger.info(f"Trip completed email sent for trip #{trip_id}")
+                                except Exception as e:
+                                    logger.error(f"Failed to send trip completed email: {e}")
+                            
+                            st.success(f"✅ Trip completed! You drove {miles_driven} miles. Check your email for trip summary.")
                             st.balloons()
                             time.sleep(1)
                             st.rerun()
@@ -5803,14 +5931,38 @@ def main():
                                             """
                                             execute_non_query(update_vehicle, (request['requester_name'], request['vehicle_id']))
                                             
-                                            # Send notification email
-                                            send_email_notification(
-                                                request['requester_email'],
-                                                "Vehicle Request Approved",
-                                                f"Your vehicle request for {request['year']} {request['make_model']} has been approved."
-                                            )
+                                            # Send comprehensive approval email
+                                            if HAS_EMAIL_AUTOMATION:
+                                                try:
+                                                    # Prepare request data for email
+                                                    request_data = {
+                                                        'request_id': request['request_id'],
+                                                        'requester_name': request['requester_name'],
+                                                        'requester_email': request['requester_email'],
+                                                        'requester_phone': request.get('requester_phone', 'N/A'),
+                                                        'year': request['year'],
+                                                        'make_model': request['make_model'],
+                                                        'license_plate': request['license_plate'],
+                                                        'current_mileage': request.get('current_mileage', 0),
+                                                        'start_date': str(request['start_date']),
+                                                        'end_date': str(request['end_date']),
+                                                        'destination': request.get('requester_location', 'N/A')
+                                                    }
+                                                    
+                                                    # Send approval email
+                                                    email_vehicle_request_approved(request_data, admin_name)
+                                                    logger.info(f"Vehicle approval email sent for request #{request['request_id']}")
+                                                except Exception as e:
+                                                    logger.error(f"Failed to send vehicle approval email: {e}")
+                                            else:
+                                                # Fallback to legacy notification
+                                                send_email_notification(
+                                                    request['requester_email'],
+                                                    "Vehicle Request Approved",
+                                                    f"Your vehicle request for {request['year']} {request['make_model']} has been approved."
+                                                )
                                             
-                                            st.success(f"✅ Request approved by {admin_name}")
+                                            st.success(f"✅ Request approved by {admin_name}. Driver notified via email.")
                                             st.session_state[f"approving_{request['request_id']}"] = False
                                             st.rerun()
                                         else:
@@ -5845,14 +5997,35 @@ def main():
                                             success, error = execute_non_query(reject_query, (admin_name, rejection_reason, request['request_id']))
                                             
                                             if success:
-                                                # Send notification email
-                                                send_email_notification(
-                                                    request['requester_email'],
-                                                    "Vehicle Request Rejected",
-                                                    f"Your vehicle request has been rejected. Reason: {rejection_reason}"
-                                                )
+                                                # Send comprehensive rejection email
+                                                if HAS_EMAIL_AUTOMATION:
+                                                    try:
+                                                        # Prepare request data for email
+                                                        request_data = {
+                                                            'request_id': request['request_id'],
+                                                            'requester_name': request['requester_name'],
+                                                            'requester_email': request['requester_email'],
+                                                            'year': request['year'],
+                                                            'make_model': request['make_model'],
+                                                            'license_plate': request['license_plate'],
+                                                            'start_date': str(request['start_date']),
+                                                            'end_date': str(request['end_date'])
+                                                        }
+                                                        
+                                                        # Send rejection email
+                                                        email_vehicle_request_rejected(request_data, admin_name, rejection_reason)
+                                                        logger.info(f"Vehicle rejection email sent for request #{request['request_id']}")
+                                                    except Exception as e:
+                                                        logger.error(f"Failed to send vehicle rejection email: {e}")
+                                                else:
+                                                    # Fallback to legacy notification
+                                                    send_email_notification(
+                                                        request['requester_email'],
+                                                        "Vehicle Request Rejected",
+                                                        f"Your vehicle request has been rejected. Reason: {rejection_reason}"
+                                                    )
                                                 
-                                                st.success(f"❌ Request rejected by {admin_name}")
+                                                st.success(f"❌ Request decision sent. Driver notified via email.")
                                                 st.rerun()
                                             else:
                                                 st.error(f"Error: {error}")
