@@ -141,6 +141,122 @@ def generate_oauth2_string(user_email: str, access_token: str) -> str:
     return base64.b64encode(auth_string.encode()).decode()
 
 
+def send_email_via_graph_api(
+    sender_email: str,
+    to_addresses: List[str],
+    subject: str,
+    html_body: str,
+    cc_addresses: List[str] = None,
+    bcc_addresses: List[str] = None,
+    access_token: str = None
+) -> bool:
+    """
+    Send email using Microsoft Graph API (for OAuth2)
+    
+    Args:
+        sender_email: Email address to send from
+        to_addresses: List of recipient email addresses
+        subject: Email subject
+        html_body: HTML email body
+        cc_addresses: CC recipients (optional)
+        bcc_addresses: BCC recipients (optional)
+        access_token: OAuth2 access token
+    
+    Returns:
+        bool: True if successful, False otherwise
+    """
+    try:
+        # Build recipients lists
+        to_recipients = [{"emailAddress": {"address": addr}} for addr in to_addresses]
+        cc_recipients = [{"emailAddress": {"address": addr}} for addr in (cc_addresses or [])]
+        bcc_recipients = [{"emailAddress": {"address": addr}} for addr in (bcc_addresses or [])]
+        
+        # Build message payload
+        message = {
+            "message": {
+                "subject": subject,
+                "body": {
+                    "contentType": "HTML",
+                    "content": html_body
+                },
+                "toRecipients": to_recipients
+            },
+            "saveToSentItems": "true"
+        }
+        
+        if cc_recipients:
+            message["message"]["ccRecipients"] = cc_recipients
+        if bcc_recipients:
+            message["message"]["bccRecipients"] = bcc_recipients
+        
+        # Send via Graph API
+        graph_url = f"https://graph.microsoft.com/v1.0/users/{sender_email}/sendMail"
+        headers = {
+            "Authorization": f"Bearer {access_token}",
+            "Content-Type": "application/json"
+        }
+        
+        logger.debug(f"Sending to Graph API: {graph_url}")
+        response = requests.post(graph_url, headers=headers, json=message)
+        
+        if response.status_code == 202:
+            logger.info(f"✅ Email sent via Graph API: {subject} to {to_addresses}")
+            return True
+        else:
+            logger.error(f"❌ Graph API error {response.status_code}: {response.text}")
+            return False
+            
+    except Exception as e:
+        logger.error(f"❌ Failed to send email via Graph API: {e}", exc_info=True)
+        return False
+
+
+
+
+def send_email_via_graph_api(
+    sender_email: str,
+    to_addresses: List[str],
+    subject: str,
+    html_body: str,
+    cc_addresses: List[str] = None,
+    bcc_addresses: List[str] = None,
+    access_token: str = None
+) -> bool:
+    """Send email using Microsoft Graph API (for OAuth2)"""
+    try:
+        to_recipients = [{"emailAddress": {"address": addr}} for addr in to_addresses]
+        cc_recipients = [{"emailAddress": {"address": addr}} for addr in (cc_addresses or [])]
+        bcc_recipients = [{"emailAddress": {"address": addr}} for addr in (bcc_addresses or [])]
+        
+        message = {
+            "message": {
+                "subject": subject,
+                "body": {"contentType": "HTML", "content": html_body},
+                "toRecipients": to_recipients
+            },
+            "saveToSentItems": "true"
+        }
+        
+        if cc_recipients:
+            message["message"]["ccRecipients"] = cc_recipients
+        if bcc_recipients:
+            message["message"]["bccRecipients"] = bcc_recipients
+        
+        graph_url = f"https://graph.microsoft.com/v1.0/users/{sender_email}/sendMail"
+        headers = {"Authorization": f"Bearer {access_token}", "Content-Type": "application/json"}
+        
+        response = requests.post(graph_url, headers=headers, json=message)
+        
+        if response.status_code == 202:
+            logger.info(f"✅ Email sent via Graph API: {subject} to {to_addresses}")
+            return True
+        else:
+            logger.error(f"❌ Graph API error {response.status_code}: {response.text}")
+            return False
+    except Exception as e:
+        logger.error(f"❌ Graph API error: {e}", exc_info=True)
+        return False
+
 # ==============================================================================
 # HTML EMAIL TEMPLATES (SAME AS BEFORE)
 # ==============================================================================
@@ -229,7 +345,7 @@ def send_email(
     use_notifications_account: bool = False
 ) -> bool:
     """
-    Send an email using O365 SMTP with OAuth2 or Basic Auth
+    Send an email using Microsoft Graph API (OAuth2) or SMTP (Basic Auth)
     
     Args:
         to_addresses: List of recipient email addresses
@@ -294,28 +410,32 @@ def send_email(
         
         # Authenticate using OAuth2 or Basic Auth
         if EmailConfig.USE_OAUTH2 and HAS_OAUTH2:
-            logger.info(f"🔐 Using OAuth2 authentication for {smtp_user}")
+            logger.info(f"🔐 Using OAuth2 with Microsoft Graph API for {smtp_user}")
             access_token = get_oauth2_token(smtp_user)
-            if not access_token:
-                logger.error("❌ OAuth2 token acquisition failed, falling back to basic auth")
-                # Fall back to basic auth
-                if not smtp_pass:
-                    logger.error("❌ No password configured for basic auth fallback")
-                    return False
-                server.login(smtp_user, smtp_pass)
+            if access_token and not attachments:
+                # Send via Graph API (no attachments support in simple version)
+                return send_email_via_graph_api(
+                    sender_email=sender,
+                    to_addresses=to_addresses,
+                    subject=subject,
+                    html_body=html_body,
+                    cc_addresses=cc_addresses,
+                    bcc_addresses=bcc_addresses,
+                    access_token=access_token
+                )
             else:
-                # Use OAuth2 XOAUTH2 mechanism
-                auth_string = generate_oauth2_string(smtp_user, access_token)
-                server.docmd("AUTH", "XOAUTH2 " + auth_string)
-                logger.info("✅ OAuth2 authentication successful")
+                if not smtp_pass:
+                    logger.error("❌ No SMTP password for fallback")
+                    return False
+                logger.info("⚠️ Using SMTP fallback (OAuth2 failed or attachments present)")
+                server.login(smtp_user, smtp_pass)
         else:
             # Use basic authentication with password
             logger.info(f"🔐 Using basic authentication for {smtp_user}")
             if not smtp_pass:
-                logger.error("❌ Email password not configured in environment variables")
+                logger.error("❌ Email password not configured")
                 return False
             server.login(smtp_user, smtp_pass)
-            logger.info("✅ Basic authentication successful")
         
         # Send email
         server.sendmail(sender, all_recipients, msg.as_string())
