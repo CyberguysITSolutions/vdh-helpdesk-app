@@ -1,13 +1,18 @@
 """
-VDH Crater Service Center - Email Automation Module
-====================================================
+VDH Crater Service Center - Email Automation Module (OAuth2 Edition)
+=====================================================================
 
 This module provides comprehensive email automation for the VDH Helpdesk application
-using Office 365 SMTP with professional HTML email templates.
+using Office 365 SMTP with OAuth2 authentication (Modern Authentication).
 
 Email Accounts:
 - service@craterservicecenter.com (Primary service notifications)
-- notifications@craterservicecenter.com (Shared inbox for all system notifications)
+- fleet@craterservicecenter.com (Fleet admin notifications)
+- notifications@craterservicecenter.com (BCC/CC for record keeping - unlicensed)
+
+Authentication Methods:
+- OAuth2 (Modern Authentication) - RECOMMENDED
+- Basic Auth with App Passwords - Fallback
 
 Author: Cyber Guys DMV
 Date: March 2026
@@ -16,6 +21,7 @@ Date: March 2026
 import os
 import smtplib
 import logging
+import base64
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from email.mime.base import MIMEBase
@@ -23,6 +29,15 @@ from email import encoders
 from datetime import datetime, timedelta
 from typing import Optional, List, Dict, Any
 import html
+
+# OAuth2 imports
+try:
+    import msal
+    import requests
+    HAS_OAUTH2 = True
+except ImportError:
+    HAS_OAUTH2 = False
+    print("⚠️ MSAL library not installed. OAuth2 not available. Install with: pip install msal requests")
 
 logger = logging.getLogger(__name__)
 
@@ -39,10 +54,16 @@ class EmailConfig:
     USE_TLS = True
     
     # Email Accounts
-    SERVICE_EMAIL = "service@craterservicecenter.com"
-    NOTIFICATIONS_EMAIL = "notifications@craterservicecenter.com"
+    SERVICE_EMAIL = os.getenv("SERVICE_EMAIL", "service@craterservicecenter.com")
+    NOTIFICATIONS_EMAIL = os.getenv("NOTIFICATIONS_EMAIL", "fleet@craterservicecenter.com")
     
-    # Get credentials from environment variables (set in Azure App Service)
+    # OAuth2 Settings (Modern Authentication - RECOMMENDED)
+    USE_OAUTH2 = os.getenv("USE_OAUTH2", "").lower() in ("true", "1", "yes")
+    AZURE_TENANT_ID = os.getenv("AZURE_TENANT_ID")
+    AZURE_CLIENT_ID = os.getenv("AZURE_CLIENT_ID")
+    AZURE_CLIENT_SECRET = os.getenv("AZURE_CLIENT_SECRET")
+    
+    # Basic Auth Fallback (App Passwords)
     SERVICE_PASSWORD = os.getenv("SERVICE_EMAIL_PASSWORD")
     NOTIFICATIONS_PASSWORD = os.getenv("NOTIFICATIONS_EMAIL_PASSWORD")
     
@@ -58,7 +79,70 @@ class EmailConfig:
 
 
 # ==============================================================================
-# HTML EMAIL TEMPLATES
+# OAUTH2 AUTHENTICATION
+# ==============================================================================
+
+def get_oauth2_token(user_email: str) -> Optional[str]:
+    """
+    Get OAuth2 access token for sending email on behalf of a user
+    
+    Args:
+        user_email: Email address to send as (service@ or notifications@)
+    
+    Returns:
+        Access token string or None if failed
+    """
+    if not HAS_OAUTH2:
+        logger.error("MSAL library not available for OAuth2")
+        return None
+    
+    if not all([EmailConfig.AZURE_TENANT_ID, EmailConfig.AZURE_CLIENT_ID, EmailConfig.AZURE_CLIENT_SECRET]):
+        logger.error("OAuth2 credentials not configured. Set AZURE_TENANT_ID, AZURE_CLIENT_ID, AZURE_CLIENT_SECRET")
+        return None
+    
+    try:
+        # Create MSAL confidential client application
+        authority = f"https://login.microsoftonline.com/{EmailConfig.AZURE_TENANT_ID}"
+        app = msal.ConfidentialClientApplication(
+            EmailConfig.AZURE_CLIENT_ID,
+            authority=authority,
+            client_credential=EmailConfig.AZURE_CLIENT_SECRET
+        )
+        
+        # Request token with Mail.Send scope
+        scopes = ["https://graph.microsoft.com/.default"]
+        result = app.acquire_token_for_client(scopes=scopes)
+        
+        if "access_token" in result:
+            logger.info(f"✅ OAuth2 token acquired successfully for {user_email}")
+            return result["access_token"]
+        else:
+            error_desc = result.get("error_description", result.get("error", "Unknown error"))
+            logger.error(f"❌ OAuth2 token acquisition failed: {error_desc}")
+            return None
+            
+    except Exception as e:
+        logger.error(f"❌ OAuth2 token error: {e}", exc_info=True)
+        return None
+
+
+def generate_oauth2_string(user_email: str, access_token: str) -> str:
+    """
+    Generate OAuth2 XOAUTH2 authentication string for SMTP
+    
+    Args:
+        user_email: Email address
+        access_token: OAuth2 access token
+    
+    Returns:
+        Base64-encoded auth string
+    """
+    auth_string = f"user={user_email}\x01auth=Bearer {access_token}\x01\x01"
+    return base64.b64encode(auth_string.encode()).decode()
+
+
+# ==============================================================================
+# HTML EMAIL TEMPLATES (SAME AS BEFORE)
 # ==============================================================================
 
 def get_email_header():
@@ -98,57 +182,40 @@ def create_button(text, url, color=None):
     return f"""
     <a href="{url}" style="
         display: inline-block;
+        padding: 12px 30px;
         background-color: {color};
         color: white;
-        padding: 12px 30px;
         text-decoration: none;
         border-radius: 5px;
         font-weight: bold;
-        margin: 10px 0;
+        margin: 20px 0;
     ">{text}</a>
     """
 
-def wrap_email_template(body_content, title="Notification"):
-    """Wrap content in standard email template"""
+def wrap_email_template(body_content, title):
+    """Wrap email content in standard template"""
     return f"""
     <!DOCTYPE html>
     <html>
     <head>
         <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>{html.escape(title)}</title>
+        <title>{title}</title>
     </head>
-    <body style="margin: 0; padding: 0; font-family: Arial, sans-serif; background-color: #f4f4f4;">
-        <table width="100%" cellpadding="0" cellspacing="0" style="background-color: #f4f4f4;">
-            <tr>
-                <td align="center" style="padding: 20px;">
-                    <table width="600" cellpadding="0" cellspacing="0" style="background-color: white; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 10px rgba(0,0,0,0.1);">
-                        <tr>
-                            <td>
-                                {get_email_header()}
-                            </td>
-                        </tr>
-                        <tr>
-                            <td style="padding: 30px;">
-                                {body_content}
-                            </td>
-                        </tr>
-                        <tr>
-                            <td>
-                                {get_email_footer()}
-                            </td>
-                        </tr>
-                    </table>
-                </td>
-            </tr>
-        </table>
+    <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; margin: 0; padding: 0; background-color: #f4f4f4;">
+        <div style="max-width: 600px; margin: 20px auto; background-color: white; box-shadow: 0 0 10px rgba(0,0,0,0.1);">
+            {get_email_header()}
+            <div style="padding: 30px;">
+                {body_content}
+            </div>
+            {get_email_footer()}
+        </div>
     </body>
     </html>
     """
 
 
 # ==============================================================================
-# CORE EMAIL SENDING FUNCTION
+# EMAIL SENDING FUNCTION (WITH OAUTH2 SUPPORT)
 # ==============================================================================
 
 def send_email(
@@ -162,7 +229,7 @@ def send_email(
     use_notifications_account: bool = False
 ) -> bool:
     """
-    Send an email using O365 SMTP
+    Send an email using O365 SMTP with OAuth2 or Basic Auth
     
     Args:
         to_addresses: List of recipient email addresses
@@ -185,10 +252,6 @@ def send_email(
         else:
             smtp_user = EmailConfig.SERVICE_EMAIL
             smtp_pass = EmailConfig.SERVICE_PASSWORD
-        
-        if not smtp_pass:
-            logger.error("Email password not configured in environment variables")
-            return False
         
         # Use provided from_address or default to account being used
         sender = from_address or smtp_user
@@ -225,21 +288,45 @@ def send_email(
         if bcc_addresses:
             all_recipients.extend(bcc_addresses)
         
-        # Connect and send
+        # Connect to SMTP server
         server = smtplib.SMTP(EmailConfig.SMTP_SERVER, EmailConfig.SMTP_PORT)
         server.starttls()
-        server.login(smtp_user, smtp_pass)
+        
+        # Authenticate using OAuth2 or Basic Auth
+        if EmailConfig.USE_OAUTH2 and HAS_OAUTH2:
+            logger.info(f"🔐 Using OAuth2 authentication for {smtp_user}")
+            access_token = get_oauth2_token(smtp_user)
+            if not access_token:
+                logger.error("❌ OAuth2 token acquisition failed, falling back to basic auth")
+                # Fall back to basic auth
+                if not smtp_pass:
+                    logger.error("❌ No password configured for basic auth fallback")
+                    return False
+                server.login(smtp_user, smtp_pass)
+            else:
+                # Use OAuth2 XOAUTH2 mechanism
+                auth_string = generate_oauth2_string(smtp_user, access_token)
+                server.docmd("AUTH", "XOAUTH2 " + auth_string)
+                logger.info("✅ OAuth2 authentication successful")
+        else:
+            # Use basic authentication with password
+            logger.info(f"🔐 Using basic authentication for {smtp_user}")
+            if not smtp_pass:
+                logger.error("❌ Email password not configured in environment variables")
+                return False
+            server.login(smtp_user, smtp_pass)
+            logger.info("✅ Basic authentication successful")
+        
+        # Send email
         server.sendmail(sender, all_recipients, msg.as_string())
         server.quit()
         
-        logger.info(f"Email sent successfully: {subject} to {to_addresses}")
+        logger.info(f"✅ Email sent successfully: {subject} to {to_addresses}")
         return True
         
     except Exception as e:
-        logger.error(f"Failed to send email: {e}", exc_info=True)
+        logger.error(f"❌ Failed to send email: {e}", exc_info=True)
         return False
-
-
 # ==============================================================================
 # HELPDESK TICKET EMAIL TEMPLATES
 # ==============================================================================
