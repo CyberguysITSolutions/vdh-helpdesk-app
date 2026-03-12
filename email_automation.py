@@ -166,10 +166,30 @@ def send_email_via_graph_api(
         bool: True if successful, False otherwise
     """
     try:
-        # Build recipients lists
-        to_recipients = [{"emailAddress": {"address": addr}} for addr in to_addresses]
-        cc_recipients = [{"emailAddress": {"address": addr}} for addr in (cc_addresses or [])]
-        bcc_recipients = [{"emailAddress": {"address": addr}} for addr in (bcc_addresses or [])]
+        # Normalize email addresses (handle comma-separated strings)
+        def normalize_emails(email_list):
+            if not email_list:
+                return []
+            normalized = []
+            for item in email_list:
+                if isinstance(item, str):
+                    # Split by comma if it's a comma-separated string
+                    if ',' in item:
+                        normalized.extend([e.strip() for e in item.split(',') if e.strip()])
+                    else:
+                        normalized.append(item.strip())
+            return normalized
+        
+        # Build recipients lists with normalized addresses
+        to_list = normalize_emails(to_addresses)
+        cc_list = normalize_emails(cc_addresses or [])
+        bcc_list = normalize_emails(bcc_addresses or [])
+        
+        to_recipients = [{"emailAddress": {"address": addr}} for addr in to_list]
+        cc_recipients = [{"emailAddress": {"address": addr}} for addr in cc_list]
+        bcc_recipients = [{"emailAddress": {"address": addr}} for addr in bcc_list]
+        
+        logger.debug(f"Graph API recipients - To: {to_list}, CC: {cc_list}, BCC: {bcc_list}")
         
         # Build message payload
         message = {
@@ -1523,7 +1543,7 @@ def email_vehicle_request_submitted(request_data: Dict[str, Any]) -> bool:
         
         html_email_admin = wrap_email_template(admin_body, "New Vehicle Request")
         
-        fleet_admin_emails = os.getenv("FLEET_ADMIN_EMAILS", os.getenv("ADMIN_EMAILS", "gclarke@vdh.virginia.gov")).split(',')
+        fleet_admin_emails = [e.strip() for e in os.getenv("FLEET_ADMIN_EMAILS", os.getenv("ADMIN_EMAILS", "gclarke@vdh.virginia.gov")).split(',')]
         
         send_email(
             to_addresses=fleet_admin_emails,
@@ -1778,7 +1798,7 @@ def email_vehicle_unavailable(request_data: Dict[str, Any], reason: str = "maint
         <p><strong>⚡ Action Required:</strong> Contact driver within 24 hours with alternative vehicle or rescheduling options.</p>
         """
         
-        fleet_admin_emails = os.getenv("FLEET_ADMIN_EMAILS", os.getenv("ADMIN_EMAILS", "gclarke@vdh.virginia.gov")).split(',')
+        fleet_admin_emails = [e.strip() for e in os.getenv("FLEET_ADMIN_EMAILS", os.getenv("ADMIN_EMAILS", "gclarke@vdh.virginia.gov")).split(',')]
         send_email(
             to_addresses=fleet_admin_emails,
             subject=f"[Urgent] Vehicle Reservation #{request_data.get('request_id')} - Alternative Needed",
@@ -1829,7 +1849,7 @@ def email_trip_started(trip_data: Dict[str, Any]) -> bool:
     
     html_email = wrap_email_template(body, "Trip Started Notification")
     
-    fleet_admin_emails = os.getenv("FLEET_ADMIN_EMAILS", os.getenv("ADMIN_EMAILS", "gclarke@vdh.virginia.gov")).split(',')
+    fleet_admin_emails = [e.strip() for e in os.getenv("FLEET_ADMIN_EMAILS", os.getenv("ADMIN_EMAILS", "gclarke@vdh.virginia.gov")).split(',')]
     
     return send_email(
         to_addresses=fleet_admin_emails,
@@ -1985,7 +2005,7 @@ def email_trip_completed(trip_data: Dict[str, Any]) -> bool:
         
         html_email_admin = wrap_email_template(admin_body, "Vehicle Returned")
         
-        fleet_admin_emails = os.getenv("FLEET_ADMIN_EMAILS", os.getenv("ADMIN_EMAILS", "gclarke@vdh.virginia.gov")).split(',')
+        fleet_admin_emails = [e.strip() for e in os.getenv("FLEET_ADMIN_EMAILS", os.getenv("ADMIN_EMAILS", "gclarke@vdh.virginia.gov")).split(',')]
         
         send_email(
             to_addresses=fleet_admin_emails,
@@ -2095,7 +2115,7 @@ def email_vehicle_service_needed(vehicle_data: Dict[str, Any], urgency: str = "d
     
     html_email = wrap_email_template(body, "Vehicle Service Alert")
     
-    fleet_admin_emails = os.getenv("FLEET_ADMIN_EMAILS", os.getenv("ADMIN_EMAILS", "gclarke@vdh.virginia.gov")).split(',')
+    fleet_admin_emails = [e.strip() for e in os.getenv("FLEET_ADMIN_EMAILS", os.getenv("ADMIN_EMAILS", "gclarke@vdh.virginia.gov")).split(',')]
     
     return send_email(
         to_addresses=fleet_admin_emails,
@@ -2174,7 +2194,7 @@ def email_vehicle_idle_alert(vehicle_data: Dict[str, Any], days_idle: int) -> bo
     
     html_email = wrap_email_template(body, "Vehicle Utilization Alert")
     
-    fleet_admin_emails = os.getenv("FLEET_ADMIN_EMAILS", os.getenv("ADMIN_EMAILS", "gclarke@vdh.virginia.gov")).split(',')
+    fleet_admin_emails = [e.strip() for e in os.getenv("FLEET_ADMIN_EMAILS", os.getenv("ADMIN_EMAILS", "gclarke@vdh.virginia.gov")).split(',')]
     
     return send_email(
         to_addresses=fleet_admin_emails,
@@ -2271,7 +2291,7 @@ def email_weekly_fleet_summary(summary_data: Dict[str, Any]) -> bool:
     
     html_email = wrap_email_template(body, "Weekly Fleet Summary")
     
-    fleet_admin_emails = os.getenv("FLEET_ADMIN_EMAILS", os.getenv("ADMIN_EMAILS", "gclarke@vdh.virginia.gov")).split(',')
+    fleet_admin_emails = [e.strip() for e in os.getenv("FLEET_ADMIN_EMAILS", os.getenv("ADMIN_EMAILS", "gclarke@vdh.virginia.gov")).split(',')]
     
     return send_email(
         to_addresses=fleet_admin_emails,
