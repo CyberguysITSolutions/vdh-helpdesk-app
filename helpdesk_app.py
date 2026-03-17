@@ -2983,19 +2983,19 @@ def render_resource_dashboard():
     total_resources_query = "SELECT COUNT(*) as count FROM dbo.resources WHERE is_active = 1"
     total_resources_df, _ = execute_query(total_resources_query)
     with col1:
-        count = total_resources_df.iloc[0]['count'] if not total_resources_df.empty else 0
+        count = int(total_resources_df.iloc[0]['count']) if not total_resources_df.empty else 0
         st.metric("Total Resources", count)
     
     total_inventory_query = "SELECT SUM(quantity_on_hand) as total FROM dbo.resource_inventory"
     total_inventory_df, _ = execute_query(total_inventory_query)
     with col2:
-        total = total_inventory_df.iloc[0]['total'] if not total_inventory_df.empty else 0
+        total = int(total_inventory_df.iloc[0]['total']) if not total_inventory_df.empty and total_inventory_df.iloc[0]['total'] is not None else 0
         st.metric("Total Stock", f"{total:,.0f}")
     
     pending_query = "SELECT COUNT(*) as count FROM dbo.resource_shipments WHERE status IN ('Pending', 'In Transit')"
     pending_df, _ = execute_query(pending_query)
     with col3:
-        pending = pending_df.iloc[0]['count'] if not pending_df.empty else 0
+        pending = int(pending_df.iloc[0]['count']) if not pending_df.empty else 0
         st.metric("Pending Shipments", pending)
     
     low_stock_query = """
@@ -3006,7 +3006,7 @@ def render_resource_dashboard():
     """
     low_stock_df, _ = execute_query(low_stock_query)
     with col4:
-        low = low_stock_df.iloc[0]['count'] if not low_stock_df.empty else 0
+        low = int(low_stock_df.iloc[0]['count']) if not low_stock_df.empty else 0
         st.metric("Low Stock Alerts", low, delta=-low if low > 0 else None)
 
 # =====================================================
@@ -3305,15 +3305,21 @@ def render_distribution_platform():
             
         if not summary_err and summary_df is not None and not summary_df.empty:
             summary = summary_df.iloc[0]
+            
+            # Convert to Python int to avoid numpy.int64 issues
+            total_items = int(summary['total_items']) if summary['total_items'] is not None else 0
+            total_units = int(summary['total_units']) if summary['total_units'] is not None else 0
+            low_stock_items = int(summary['low_stock_items']) if summary['low_stock_items'] is not None else 0
+            out_of_stock = int(summary['out_of_stock']) if summary['out_of_stock'] is not None else 0
                 
             with col1:
-                st.metric("Total Items", f"{summary['total_items']:,}")
+                st.metric("Total Items", f"{total_items:,}")
             with col2:
-                st.metric("Total Units", f"{summary['total_units']:,}")
+                st.metric("Total Units", f"{total_units:,}")
             with col3:
-                st.metric("Low Stock", f"{summary['low_stock_items']:,}", delta=None if summary['low_stock_items'] == 0 else "⚠️")
+                st.metric("Low Stock", f"{low_stock_items:,}", delta=None if low_stock_items == 0 else "⚠️")
             with col4:
-                st.metric("Out of Stock", f"{summary['out_of_stock']:,}", delta=None if summary['out_of_stock'] == 0 else "🚨")
+                st.metric("Out of Stock", f"{out_of_stock:,}", delta=None if out_of_stock == 0 else "🚨")
             
         st.markdown("---")
             
