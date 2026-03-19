@@ -6140,6 +6140,91 @@ def main():
             else:
                 st.warning(f"⚠️ {len(pending_df)} pending vehicle request(s) awaiting approval")
                 
+                # Bulk Operations Section
+                with st.expander("🔄 Bulk Operations"):
+                    st.markdown("### Bulk Reject Requests")
+                    st.info("Select multiple requests to reject them all at once with the same reason.")
+                    
+                    # Create checkboxes for bulk selection
+                    bulk_reject_ids = []
+                    for idx, request in pending_df.iterrows():
+                        if st.checkbox(
+                            f"Request #{request['request_id']} - {request['requester_name']} ({request['year']} {request['make_model']})",
+                            key=f"bulk_select_{request['request_id']}"
+                        ):
+                            bulk_reject_ids.append(request['request_id'])
+                    
+                    if bulk_reject_ids:
+                        st.success(f"✅ Selected {len(bulk_reject_ids)} request(s) for bulk rejection")
+                        
+                        with st.form("bulk_reject_form"):
+                            st.markdown(f"**Rejecting {len(bulk_reject_ids)} request(s)**")
+                            bulk_admin_name = st.text_input("Your Name (Admin) *")
+                            bulk_rejection_reason = st.text_area(
+                                "Rejection Reason (applies to all selected) *",
+                                placeholder="e.g., Insufficient vehicles available for the requested period"
+                            )
+                            
+                            col_bulk_submit, col_bulk_cancel = st.columns(2)
+                            with col_bulk_submit:
+                                submit_bulk_reject = st.form_submit_button("❌ Reject All Selected", type="primary", use_container_width=True)
+                            with col_bulk_cancel:
+                                cancel_bulk = st.form_submit_button("Cancel", use_container_width=True)
+                            
+                            if submit_bulk_reject:
+                                if bulk_admin_name and bulk_rejection_reason:
+                                    success_count = 0
+                                    error_count = 0
+                                    
+                                    for req_id in bulk_reject_ids:
+                                        # Update database
+                                        reject_query = """
+                                            UPDATE dbo.Vehicle_Requests 
+                                            SET status = 'Rejected', 
+                                                approved_by = ?,
+                                                approved_date = GETDATE(),
+                                                rejection_reason = ?,
+                                                updated_at = GETDATE()
+                                            WHERE request_id = ?
+                                        """
+                                        success, error = execute_non_query(reject_query, (bulk_admin_name, bulk_rejection_reason, req_id))
+                                        
+                                        if success:
+                                            success_count += 1
+                                            
+                                            # Send rejection email
+                                            if HAS_EMAIL_AUTOMATION:
+                                                try:
+                                                    request_row = pending_df[pending_df['request_id'] == req_id].iloc[0]
+                                                    request_data = {
+                                                        'request_id': req_id,
+                                                        'requester_name': request_row['requester_name'],
+                                                        'requester_email': request_row['requester_email'],
+                                                        'year': request_row['year'],
+                                                        'make_model': request_row['make_model'],
+                                                        'license_plate': request_row['license_plate'],
+                                                        'start_date': str(request_row['start_date']),
+                                                        'end_date': str(request_row['end_date'])
+                                                    }
+                                                    email_vehicle_request_rejected(request_data, bulk_admin_name, bulk_rejection_reason)
+                                                    logger.info(f"Bulk rejection email sent for request #{req_id}")
+                                                except Exception as e:
+                                                    logger.error(f"Failed to send bulk rejection email for request #{req_id}: {e}")
+                                        else:
+                                            error_count += 1
+                                            logger.error(f"Failed to reject request #{req_id}: {error}")
+                                    
+                                    if success_count > 0:
+                                        st.success(f"✅ Successfully rejected {success_count} request(s). All drivers have been notified via email.")
+                                    if error_count > 0:
+                                        st.error(f"❌ Failed to reject {error_count} request(s)")
+                                    
+                                    st.rerun()
+                                else:
+                                    st.error("Please provide your name and rejection reason")
+                
+                st.markdown("---")
+                
                 # Show each pending request
                 for idx, request in pending_df.iterrows():
                     with st.expander(f"🚗 Request #{request['request_id']} - {request['requester_name']} ({request['year']} {request['make_model']})"):
@@ -6255,12 +6340,25 @@ def main():
                                     st.rerun()
                         
                         with col3:
-                            if st.button("❌ Reject", key=f"reject_vehicle_{request['request_id']}", use_container_width=True):
+                            reject_key = f"rejecting_{request['request_id']}"
+                            
+                            # Check if we're showing the reject form
+                            if st.session_state.get(reject_key, False):
+                                # Show rejection form
                                 with st.form(key=f"reject_form_{request['request_id']}"):
-                                    admin_name = st.text_input("Your Name (Admin)")
-                                    rejection_reason = st.text_area("Rejection Reason *")
+                                    st.markdown("### Reject Vehicle Request")
+                                    admin_name = st.text_input("Your Name (Admin) *", key=f"reject_name_{request['request_id']}")
+                                    rejection_reason = st.text_area("Rejection Reason *", 
+                                                                  placeholder="e.g., Vehicle unavailable for requested dates, maintenance required, etc.",
+                                                                  key=f"reject_reason_{request['request_id']}")
                                     
-                                    if st.form_submit_button("Confirm Rejection"):
+                                    col_submit, col_cancel = st.columns(2)
+                                    with col_submit:
+                                        submit_reject = st.form_submit_button("✅ Confirm Rejection", type="primary", use_container_width=True)
+                                    with col_cancel:
+                                        cancel_reject = st.form_submit_button("❌ Cancel", use_container_width=True)
+                                    
+                                    if submit_reject:
                                         if admin_name and rejection_reason:
                                             reject_query = """
                                                 UPDATE dbo.Vehicle_Requests 
@@ -6302,12 +6400,22 @@ def main():
                                                         f"Your vehicle request has been rejected. Reason: {rejection_reason}"
                                                     )
                                                 
-                                                st.success(f"❌ Request decision sent. Driver notified via email.")
+                                                st.success(f"❌ Request rejected by {admin_name}. Driver notified via email.")
+                                                st.session_state[reject_key] = False
                                                 st.rerun()
                                             else:
                                                 st.error(f"Error: {error}")
                                         else:
                                             st.error("Please provide your name and rejection reason")
+                                    
+                                    if cancel_reject:
+                                        st.session_state[reject_key] = False
+                                        st.rerun()
+                            else:
+                                # Show reject button
+                                if st.button("❌ Reject", key=f"reject_vehicle_{request['request_id']}", use_container_width=True):
+                                    st.session_state[reject_key] = True
+                                    st.rerun()
                 
                 st.markdown("---")
                 st.subheader("📜 Approval History")

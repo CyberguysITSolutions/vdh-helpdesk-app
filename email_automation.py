@@ -1629,11 +1629,16 @@ def email_vehicle_request_approved(request_data: Dict[str, Any], approved_by: st
     
     html_email = wrap_email_template(body, "Vehicle Request Approved")
     
+    # Get fleet admin emails
+    fleet_admin_emails = os.getenv("FLEET_ADMIN_EMAILS", os.getenv("ADMIN_EMAILS", "")).split(',')
+    fleet_admin_emails = [e.strip() for e in fleet_admin_emails if e.strip()]
+    
+    # Send to requester with BCC to admins
     return send_email(
         to_addresses=[request_data.get('requester_email')],
         subject=f"✅ Vehicle Request #{request_data.get('request_id')} - Approved & Ready for Pickup!",
         html_body=html_email,
-        bcc_addresses=[EmailConfig.NOTIFICATIONS_EMAIL]
+        bcc_addresses=fleet_admin_emails  # Send to ALL fleet admins
     )
 
 
@@ -1691,11 +1696,15 @@ def email_vehicle_request_rejected(request_data: Dict[str, Any], rejected_by: st
     
     html_email = wrap_email_template(body, "Vehicle Request Update")
     
+    # Get fleet admin emails
+    fleet_admin_emails = os.getenv("FLEET_ADMIN_EMAILS", os.getenv("ADMIN_EMAILS", "")).split(',')
+    fleet_admin_emails = [e.strip() for e in fleet_admin_emails if e.strip()]
+    
     return send_email(
         to_addresses=[request_data.get('requester_email')],
         subject=f"Vehicle Request #{request_data.get('request_id')} - Update Required",
         html_body=html_email,
-        bcc_addresses=[EmailConfig.NOTIFICATIONS_EMAIL]
+        bcc_addresses=fleet_admin_emails  # Send to ALL fleet admins
     )
 
 
