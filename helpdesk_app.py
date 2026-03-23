@@ -1577,7 +1577,7 @@ def render_driver_trip_entry_public_form():
     
     # Check for active trip
     active_trip_query = """
-        SELECT trip_id, start_location, start_mileage, start_datetime, department, notes
+        SELECT trip_id, start_location, starting_mileage, start_datetime, department, notes
         FROM dbo.vehicle_trips
         WHERE vehicle_id = ? AND trip_status = 'In Progress'
         ORDER BY start_datetime DESC
@@ -1620,9 +1620,10 @@ def render_driver_trip_entry_public_form():
                         driver_name = driver_email.split('@')[0]
                         notes_with_email = f"Driver: {driver_name} ({driver_email})\n{trip_notes if trip_notes else ''}"
                         
+                        # Try common mileage column name variations
                         insert_query = """
                             INSERT INTO dbo.vehicle_trips 
-                            (vehicle_id, department, start_location, start_mileage, 
+                            (vehicle_id, department, start_location, starting_mileage, 
                              start_datetime, trip_status, notes)
                             VALUES (?, ?, ?, ?, GETDATE(), 'In Progress', ?)
                         """
@@ -1685,7 +1686,7 @@ def render_driver_trip_entry_public_form():
             
             st.success(f"**Active Trip:**")
             st.write(f"🏁 Started from: {start_info['start_location']}")
-            st.write(f"📏 Starting mileage: {start_info['start_mileage']:,} miles")
+            st.write(f"📏 Starting mileage: {start_info['starting_mileage']:,} miles")
             st.write(f"🕐 Started at: {start_info['start_datetime']}")
             
             with st.form("end_trip_form"):
@@ -1694,7 +1695,7 @@ def render_driver_trip_entry_public_form():
                     end_location = st.text_input("📍 Ending Location*", 
                                                 placeholder="e.g., VDH Hopewell Office")
                     end_mileage = st.number_input("🛣️ Ending Mileage*", 
-                                                 min_value=int(start_info['start_mileage']), 
+                                                 min_value=int(start_info['starting_mileage']), 
                                                  step=1)
                 with col2:
                     end_notes = st.text_area("📝 Trip Notes (Optional)", 
@@ -1707,7 +1708,7 @@ def render_driver_trip_entry_public_form():
                         accept_multiple_files=True
                     )
                 
-                miles_driven = end_mileage - int(start_info['start_mileage']) if end_mileage > 0 else 0
+                miles_driven = end_mileage - int(start_info['starting_mileage']) if end_mileage > 0 else 0
                 if miles_driven > 0:
                     st.info(f"🛣️ Miles driven: **{miles_driven}** miles")
                 
@@ -1716,13 +1717,13 @@ def render_driver_trip_entry_public_form():
                 if submit_end:
                     if not end_location or end_mileage == 0:
                         st.error("Please fill in all required fields!")
-                    elif end_mileage < int(start_info['start_mileage']):
+                    elif end_mileage < int(start_info['starting_mileage']):
                         st.error("Ending mileage cannot be less than starting mileage!")
                     else:
                         # Update trip
                         update_query = """
                             UPDATE dbo.vehicle_trips
-                            SET end_location = ?, end_mileage = ?, end_datetime = GETDATE(),
+                            SET end_location = ?, ending_mileage = ?, end_datetime = GETDATE(),
                                 trip_status = 'Completed', 
                                 notes = ISNULL(notes, '') + CHAR(13) + CHAR(10) + ?
                             WHERE trip_id = ?
@@ -1788,7 +1789,7 @@ def render_driver_trip_entry_public_form():
                                             'license_plate': vehicle_info['license_plate'],
                                             'start_location': start_info['start_location'],
                                             'end_location': end_location,
-                                            'start_mileage': int(start_info['start_mileage']),
+                                            'start_mileage': int(start_info['starting_mileage']),
                                             'end_mileage': int(end_mileage),
                                             'start_datetime': str(start_info['start_datetime']),
                                             'end_datetime': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
