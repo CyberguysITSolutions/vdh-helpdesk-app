@@ -1515,14 +1515,49 @@ def render_driver_trip_entry_public_form():
         st.info("👆 Please enter your email to continue")
         st.stop()
     
-    # Get approved vehicles for this driver
+    # Get vehicles currently assigned to this driver
+    # Extract name parts from email for flexible matching
+    email_prefix = driver_email.split('@')[0].lower()  # "gil.clarke"
+    name_parts = email_prefix.replace('.', ' ').replace('_', ' ')  # "gil clarke"
+    first_name = email_prefix.split('.')[0] if '.' in email_prefix else email_prefix.split('_')[0] if '_' in email_prefix else email_prefix
+    
     vehicles_query = """
-        SELECT v.id, v.vehicle_name, v.vehicle_type, v.license_plate, v.vin
-        FROM dbo.dispatched_vehicles dv
-        JOIN dbo.vehicles v ON dv.vehicle_id = v.id
-        WHERE dv.approved_email = ? AND dv.approval_status = 'Approved'
+        SELECT DISTINCT 
+            v.id, 
+            v.year,
+            v.make_model, 
+            v.license_plate, 
+            v.vin,
+            v.status
+        FROM dbo.vehicles v
+        WHERE v.status IN ('Dispatched', 'Available')
+          AND (
+              -- Match by full email
+              LOWER(v.current_driver) LIKE ?
+              -- Match by name with space (e.g., "Gil Clarke")
+              OR LOWER(v.current_driver) LIKE ?
+              -- Match by first name only (e.g., "Gil")
+              OR LOWER(v.current_driver) LIKE ?
+              -- Also check approved vehicle requests
+              OR v.id IN (
+                  SELECT vehicle_id 
+                  FROM dbo.Vehicle_Requests 
+                  WHERE requester_email = ? 
+                    AND status = 'Approved'
+              )
+          )
+        ORDER BY v.make_model
     """
-    vehicles_df, vehicles_err = execute_query(vehicles_query, (driver_email,))
+    
+    # Create search patterns
+    email_pattern = f"%{email_prefix}%"  # %gil.clarke%
+    name_pattern = f"%{name_parts}%"     # %gil clarke%
+    first_name_pattern = f"%{first_name}%"  # %gil%
+    
+    vehicles_df, vehicles_err = execute_query(
+        vehicles_query, 
+        (email_pattern, name_pattern, first_name_pattern, driver_email)
+    )
     
     if vehicles_err or vehicles_df is None or vehicles_df.empty:
         st.warning(f"⚠️ No approved vehicles found for {driver_email}")
@@ -1534,7 +1569,7 @@ def render_driver_trip_entry_public_form():
     st.subheader("🚙 Select Your Vehicle")
     
     vehicle_options = [
-        f"{row['vehicle_name']} - {row['license_plate']}" 
+        f"{row['year']} {row['make_model']} - {row['license_plate']}" 
         for _, row in vehicles_df.iterrows()
     ]
     selected_vehicle = st.selectbox("Vehicle", vehicle_options, label_visibility="collapsed")
@@ -2983,19 +3018,19 @@ def render_resource_dashboard():
     total_resources_query = "SELECT COUNT(*) as count FROM dbo.resources WHERE is_active = 1"
     total_resources_df, _ = execute_query(total_resources_query)
     with col1:
-        count = total_resources_df.iloc[0]['count'] if not total_resources_df.empty else 0
+        count = int(total_resources_df.iloc[0]['count']) if not total_resources_df.empty else 0
         st.metric("Total Resources", count)
     
     total_inventory_query = "SELECT SUM(quantity_on_hand) as total FROM dbo.resource_inventory"
     total_inventory_df, _ = execute_query(total_inventory_query)
     with col2:
-        total = total_inventory_df.iloc[0]['total'] if not total_inventory_df.empty else 0
+        total = int(total_inventory_df.iloc[0]['total']) if not total_inventory_df.empty and total_inventory_df.iloc[0]['total'] is not None else 0
         st.metric("Total Stock", f"{total:,.0f}")
     
     pending_query = "SELECT COUNT(*) as count FROM dbo.resource_shipments WHERE status IN ('Pending', 'In Transit')"
     pending_df, _ = execute_query(pending_query)
     with col3:
-        pending = pending_df.iloc[0]['count'] if not pending_df.empty else 0
+        pending = int(pending_df.iloc[0]['count']) if not pending_df.empty else 0
         st.metric("Pending Shipments", pending)
     
     low_stock_query = """
@@ -3006,7 +3041,7 @@ def render_resource_dashboard():
     """
     low_stock_df, _ = execute_query(low_stock_query)
     with col4:
-        low = low_stock_df.iloc[0]['count'] if not low_stock_df.empty else 0
+        low = int(low_stock_df.iloc[0]['count']) if not low_stock_df.empty else 0
         st.metric("Low Stock Alerts", low, delta=-low if low > 0 else None)
 
 # =====================================================
@@ -3305,15 +3340,21 @@ def render_distribution_platform():
             
         if not summary_err and summary_df is not None and not summary_df.empty:
             summary = summary_df.iloc[0]
+            
+            # Convert to Python int to avoid numpy.int64 issues
+            total_items = int(summary['total_items']) if summary['total_items'] is not None else 0
+            total_units = int(summary['total_units']) if summary['total_units'] is not None else 0
+            low_stock_items = int(summary['low_stock_items']) if summary['low_stock_items'] is not None else 0
+            out_of_stock = int(summary['out_of_stock']) if summary['out_of_stock'] is not None else 0
                 
             with col1:
-                st.metric("Total Items", f"{summary['total_items']:,}")
+                st.metric("Total Items", f"{total_items:,}")
             with col2:
-                st.metric("Total Units", f"{summary['total_units']:,}")
+                st.metric("Total Units", f"{total_units:,}")
             with col3:
-                st.metric("Low Stock", f"{summary['low_stock_items']:,}", delta=None if summary['low_stock_items'] == 0 else "⚠️")
+                st.metric("Low Stock", f"{low_stock_items:,}", delta=None if low_stock_items == 0 else "⚠️")
             with col4:
-                st.metric("Out of Stock", f"{summary['out_of_stock']:,}", delta=None if summary['out_of_stock'] == 0 else "🚨")
+                st.metric("Out of Stock", f"{out_of_stock:,}", delta=None if out_of_stock == 0 else "🚨")
             
         st.markdown("---")
             
@@ -6134,6 +6175,91 @@ def main():
             else:
                 st.warning(f"⚠️ {len(pending_df)} pending vehicle request(s) awaiting approval")
                 
+                # Bulk Operations Section
+                with st.expander("🔄 Bulk Operations"):
+                    st.markdown("### Bulk Reject Requests")
+                    st.info("Select multiple requests to reject them all at once with the same reason.")
+                    
+                    # Create checkboxes for bulk selection
+                    bulk_reject_ids = []
+                    for idx, request in pending_df.iterrows():
+                        if st.checkbox(
+                            f"Request #{request['request_id']} - {request['requester_name']} ({request['year']} {request['make_model']})",
+                            key=f"bulk_select_{request['request_id']}"
+                        ):
+                            bulk_reject_ids.append(request['request_id'])
+                    
+                    if bulk_reject_ids:
+                        st.success(f"✅ Selected {len(bulk_reject_ids)} request(s) for bulk rejection")
+                        
+                        with st.form("bulk_reject_form"):
+                            st.markdown(f"**Rejecting {len(bulk_reject_ids)} request(s)**")
+                            bulk_admin_name = st.text_input("Your Name (Admin) *")
+                            bulk_rejection_reason = st.text_area(
+                                "Rejection Reason (applies to all selected) *",
+                                placeholder="e.g., Insufficient vehicles available for the requested period"
+                            )
+                            
+                            col_bulk_submit, col_bulk_cancel = st.columns(2)
+                            with col_bulk_submit:
+                                submit_bulk_reject = st.form_submit_button("❌ Reject All Selected", type="primary", use_container_width=True)
+                            with col_bulk_cancel:
+                                cancel_bulk = st.form_submit_button("Cancel", use_container_width=True)
+                            
+                            if submit_bulk_reject:
+                                if bulk_admin_name and bulk_rejection_reason:
+                                    success_count = 0
+                                    error_count = 0
+                                    
+                                    for req_id in bulk_reject_ids:
+                                        # Update database
+                                        reject_query = """
+                                            UPDATE dbo.Vehicle_Requests 
+                                            SET status = 'Rejected', 
+                                                approved_by = ?,
+                                                approved_date = GETDATE(),
+                                                rejection_reason = ?,
+                                                updated_at = GETDATE()
+                                            WHERE request_id = ?
+                                        """
+                                        success, error = execute_non_query(reject_query, (bulk_admin_name, bulk_rejection_reason, req_id))
+                                        
+                                        if success:
+                                            success_count += 1
+                                            
+                                            # Send rejection email
+                                            if HAS_EMAIL_AUTOMATION:
+                                                try:
+                                                    request_row = pending_df[pending_df['request_id'] == req_id].iloc[0]
+                                                    request_data = {
+                                                        'request_id': req_id,
+                                                        'requester_name': request_row['requester_name'],
+                                                        'requester_email': request_row['requester_email'],
+                                                        'year': request_row['year'],
+                                                        'make_model': request_row['make_model'],
+                                                        'license_plate': request_row['license_plate'],
+                                                        'start_date': str(request_row['start_date']),
+                                                        'end_date': str(request_row['end_date'])
+                                                    }
+                                                    email_vehicle_request_rejected(request_data, bulk_admin_name, bulk_rejection_reason)
+                                                    logger.info(f"Bulk rejection email sent for request #{req_id}")
+                                                except Exception as e:
+                                                    logger.error(f"Failed to send bulk rejection email for request #{req_id}: {e}")
+                                        else:
+                                            error_count += 1
+                                            logger.error(f"Failed to reject request #{req_id}: {error}")
+                                    
+                                    if success_count > 0:
+                                        st.success(f"✅ Successfully rejected {success_count} request(s). All drivers have been notified via email.")
+                                    if error_count > 0:
+                                        st.error(f"❌ Failed to reject {error_count} request(s)")
+                                    
+                                    st.rerun()
+                                else:
+                                    st.error("Please provide your name and rejection reason")
+                
+                st.markdown("---")
+                
                 # Show each pending request
                 for idx, request in pending_df.iterrows():
                     with st.expander(f"🚗 Request #{request['request_id']} - {request['requester_name']} ({request['year']} {request['make_model']})"):
@@ -6249,12 +6375,25 @@ def main():
                                     st.rerun()
                         
                         with col3:
-                            if st.button("❌ Reject", key=f"reject_vehicle_{request['request_id']}", use_container_width=True):
+                            reject_key = f"rejecting_{request['request_id']}"
+                            
+                            # Check if we're showing the reject form
+                            if st.session_state.get(reject_key, False):
+                                # Show rejection form
                                 with st.form(key=f"reject_form_{request['request_id']}"):
-                                    admin_name = st.text_input("Your Name (Admin)")
-                                    rejection_reason = st.text_area("Rejection Reason *")
+                                    st.markdown("### Reject Vehicle Request")
+                                    admin_name = st.text_input("Your Name (Admin) *", key=f"reject_name_{request['request_id']}")
+                                    rejection_reason = st.text_area("Rejection Reason *", 
+                                                                  placeholder="e.g., Vehicle unavailable for requested dates, maintenance required, etc.",
+                                                                  key=f"reject_reason_{request['request_id']}")
                                     
-                                    if st.form_submit_button("Confirm Rejection"):
+                                    col_submit, col_cancel = st.columns(2)
+                                    with col_submit:
+                                        submit_reject = st.form_submit_button("✅ Confirm Rejection", type="primary", use_container_width=True)
+                                    with col_cancel:
+                                        cancel_reject = st.form_submit_button("❌ Cancel", use_container_width=True)
+                                    
+                                    if submit_reject:
                                         if admin_name and rejection_reason:
                                             reject_query = """
                                                 UPDATE dbo.Vehicle_Requests 
@@ -6296,12 +6435,22 @@ def main():
                                                         f"Your vehicle request has been rejected. Reason: {rejection_reason}"
                                                     )
                                                 
-                                                st.success(f"❌ Request decision sent. Driver notified via email.")
+                                                st.success(f"❌ Request rejected by {admin_name}. Driver notified via email.")
+                                                st.session_state[reject_key] = False
                                                 st.rerun()
                                             else:
                                                 st.error(f"Error: {error}")
                                         else:
                                             st.error("Please provide your name and rejection reason")
+                                    
+                                    if cancel_reject:
+                                        st.session_state[reject_key] = False
+                                        st.rerun()
+                            else:
+                                # Show reject button
+                                if st.button("❌ Reject", key=f"reject_vehicle_{request['request_id']}", use_container_width=True):
+                                    st.session_state[reject_key] = True
+                                    st.rerun()
                 
                 st.markdown("---")
                 st.subheader("📜 Approval History")
@@ -6633,8 +6782,9 @@ def main():
                         photo_url = vehicle.get('photo_url') or vehicle.get('picture_url')
                         if photo_url and str(photo_url).strip() and str(photo_url) != 'nan':
                             try:
-                                st.image(photo_url, width='stretch', caption=f"{vehicle.get('year', '')} {vehicle.get('make_model', '')}")
-                            except:
+                                st.image(photo_url, use_column_width=True, caption=f"{vehicle.get('year', '')} {vehicle.get('make_model', '')}")
+                            except Exception as e:
+                                logger.error(f"Failed to display image in detail view: {e}")
                                 st.markdown("""
                                     <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
                                                 padding: 60px; text-align: center; border-radius: 10px; color: white; font-size: 48px;">
@@ -6814,7 +6964,7 @@ def main():
                         status_filter = st.multiselect(
                             "Filter by Status",
                             options=['Available', 'Dispatched', 'Maintenance', 'Out Of Service'],
-                            default=['Available', 'Dispatched']
+                            default=['Available', 'Dispatched', 'Maintenance', 'Out Of Service']  # Show ALL by default
                         )
                     
                     filtered_df = df.copy()
@@ -6843,8 +6993,10 @@ def main():
                                 photo_url = vehicle.get('photo_url') or vehicle.get('picture_url')
                                 if photo_url and str(photo_url).strip() and str(photo_url) != 'nan':
                                     try:
-                                        st.image(photo_url, width='stretch')
-                                    except:
+                                        st.image(photo_url, use_column_width=True)  # ✅ Use use_column_width instead
+                                    except Exception as e:
+                                        # Log the error for debugging
+                                        logger.error(f"Failed to display image for vehicle {vehicle.get('id')}: {e}")
                                         st.markdown("""
                                             <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
                                                         padding: 30px; text-align: center; border-radius: 8px; color: white; font-size: 36px;">
