@@ -1860,8 +1860,14 @@ def email_trip_started(trip_data: Dict[str, Any]) -> bool:
     
     fleet_admin_emails = [e.strip() for e in os.getenv("FLEET_ADMIN_EMAILS", os.getenv("ADMIN_EMAILS", "gclarke@vdh.virginia.gov")).split(',')]
     
+    # Add driver to recipients
+    driver_email = trip_data.get('driver_email')
+    to_addresses = fleet_admin_emails.copy()
+    if driver_email and driver_email not in to_addresses:
+        to_addresses.append(driver_email)
+    
     return send_email(
-        to_addresses=fleet_admin_emails,
+        to_addresses=to_addresses,
         subject=f"🚗 Trip Started - {trip_data.get('make_model')} ({trip_data.get('license_plate')})",
         html_body=html_email,
         cc_addresses=[EmailConfig.NOTIFICATIONS_EMAIL],

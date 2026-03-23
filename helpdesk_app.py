@@ -1510,11 +1510,54 @@ def render_driver_trip_entry_public_form():
     
     # Driver identification
     st.subheader("👤 Driver Information")
-    driver_email = st.text_input("📧 Your Email Address", placeholder="driver@vdh.virginia.gov")
+    driver_email_input = st.text_input("📧 Your Email or Name", placeholder="e.g., gil.clarke or gil.clarke@vdh.virginia.gov")
     
-    if not driver_email:
-        st.info("👆 Please enter your email to continue")
+    if not driver_email_input:
+        st.info("👆 Please enter your email or name to continue")
         st.stop()
+    
+    # Smart email lookup - if user didn't provide full email, look it up from vehicle requests
+    driver_email = driver_email_input.strip()
+    
+    # If input doesn't have @ symbol, try to find full email from approved vehicle requests
+    if '@' not in driver_email:
+        st.info(f"🔍 Looking up email for '{driver_email}'...")
+        
+        # Search for approved vehicle requests matching this name/email prefix
+        email_lookup_query = """
+            SELECT DISTINCT requester_email
+            FROM dbo.Vehicle_Requests
+            WHERE status = 'Approved'
+              AND (
+                  LOWER(requester_email) LIKE ?
+                  OR LOWER(SUBSTRING(requester_email, 1, CHARINDEX('@', requester_email) - 1)) LIKE ?
+              )
+            ORDER BY requester_email
+        """
+        
+        search_pattern = f"%{driver_email.lower()}%"
+        email_results, _ = execute_query(email_lookup_query, (search_pattern, search_pattern))
+        
+        if email_results is not None and not email_results.empty:
+            if len(email_results) == 1:
+                # Found exactly one match - use it!
+                driver_email = email_results.iloc[0]['requester_email']
+                st.success(f"✅ Found your email: {driver_email}")
+            else:
+                # Multiple matches - let user select
+                st.warning(f"Found {len(email_results)} accounts matching '{driver_email_input}':")
+                email_options = email_results['requester_email'].tolist()
+                driver_email = st.selectbox("Select your email:", email_options)
+                st.success(f"✅ Using: {driver_email}")
+        else:
+            # No matches found - require full email
+            st.error(f"❌ No approved vehicle requests found for '{driver_email_input}'")
+            st.info("💡 Please enter your full email address (e.g., your.name@vdh.virginia.gov)")
+            st.info("Or contact fleet management to get vehicle approval first.")
+            st.stop()
+    else:
+        # User provided full email - verify it has approved vehicle requests
+        st.success(f"✅ Using email: {driver_email}")
     
     # Get vehicles currently assigned to this driver
     # Extract name parts from email for flexible matching
