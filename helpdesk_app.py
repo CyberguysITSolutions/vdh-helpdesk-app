@@ -1576,17 +1576,30 @@ def render_driver_trip_entry_public_form():
     selected_vehicle = st.selectbox("Vehicle", vehicle_options, label_visibility="collapsed")
     vehicle_id = vehicles_df.iloc[vehicle_options.index(selected_vehicle)]['id']
     
-    # Check for active trip
+    # Check for active trip - check by driver email first, then by vehicle
     active_trip_query = """
-        SELECT trip_id, start_location, starting_mileage, departure_time, 
-               department, notes, destination, requester_first, requester_last
+        SELECT trip_id, vehicle_id, start_location, starting_mileage, departure_time, 
+               department, notes, destination, requester_first, requester_last, requester_email, driver_email
         FROM dbo.vehicle_trips
-        WHERE vehicle_id = ? AND status = 'In Progress'
+        WHERE status = 'In Progress'
+          AND (driver_email = ? OR requester_email = ? OR vehicle_id = ?)
         ORDER BY departure_time DESC
     """
-    active_trip_df, _ = execute_query(active_trip_query, (int(vehicle_id),))
+    active_trip_df, _ = execute_query(active_trip_query, (driver_email, driver_email, int(vehicle_id)))
     
     has_active_trip = active_trip_df is not None and not active_trip_df.empty
+    
+    # If user has an active trip on a DIFFERENT vehicle, show warning
+    if has_active_trip:
+        active_vehicle_id = active_trip_df.iloc[0]['vehicle_id']
+        if active_vehicle_id != vehicle_id:
+            st.warning(f"⚠️ You have an active trip on vehicle ID {active_vehicle_id}. Please select that vehicle to end the trip.")
+            # Update the selected vehicle to match the active trip
+            active_vehicle_row = vehicles_df[vehicles_df['id'] == active_vehicle_id]
+            if not active_vehicle_row.empty:
+                vehicle_id = active_vehicle_id
+                selected_vehicle = f"{active_vehicle_row.iloc[0]['year']} {active_vehicle_row.iloc[0]['make_model']} - {active_vehicle_row.iloc[0]['license_plate']}"
+                st.info(f"🚗 Automatically selected: {selected_vehicle}")
     
     # Tabs for Start Trip / End Trip
     tab1, tab2 = st.tabs(["🟢 Start Trip", "🔴 End Trip"])
@@ -1595,8 +1608,12 @@ def render_driver_trip_entry_public_form():
         st.subheader("🟢 Start a New Trip")
         
         if has_active_trip:
+            active_trip_info = active_trip_df.iloc[0]
             st.warning("⚠️ You have an active trip! Please end it before starting a new one.")
-            st.info(f"Active trip started at: {active_trip_df.iloc[0]['start_location']}")
+            st.info(f"📍 Active trip from: {active_trip_info['start_location']}")
+            st.info(f"🚗 Vehicle ID: {active_trip_info['vehicle_id']}")
+            st.info(f"🕐 Started: {active_trip_info['departure_time']}")
+            st.info("👉 Go to the 'End Trip' tab to complete this trip first.")
         else:
             with st.form("start_trip_form"):
                 col1, col2 = st.columns(2)
