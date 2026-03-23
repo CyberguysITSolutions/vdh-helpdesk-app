@@ -21,6 +21,7 @@ from datetime import datetime, timedelta
 import os
 import traceback
 import csv
+import time
 from io import BytesIO
 import base64
 from typing import Optional, Tuple, TYPE_CHECKING
@@ -1650,6 +1651,7 @@ def render_driver_trip_entry_public_form():
                             new_trip_id = trip_id_result.iloc[0]['trip_id'] if trip_id_result is not None and not trip_id_result.empty else None
                             
                             # Get vehicle details for email
+                            email_sent_successfully = False
                             if HAS_EMAIL_AUTOMATION and new_trip_id:
                                 try:
                                     vehicle_query = f"SELECT year, make_model, license_plate FROM dbo.vehicles WHERE id = {vehicle_id}"
@@ -1673,12 +1675,28 @@ def render_driver_trip_entry_public_form():
                                         }
                                         
                                         # Send trip started notification to fleet admin
-                                        email_trip_started(trip_data)
-                                        logger.info(f"Trip started email sent for trip #{new_trip_id}")
+                                        try:
+                                            email_result = email_trip_started(trip_data)
+                                            if email_result:
+                                                logger.info(f"✅ Trip started email sent for trip #{new_trip_id}")
+                                                email_sent_successfully = True
+                                            else:
+                                                logger.warning(f"⚠️ Trip started email returned False for trip #{new_trip_id}")
+                                        except Exception as email_err:
+                                            logger.error(f"❌ Email sending exception for trip #{new_trip_id}: {email_err}")
+                                            logger.exception(email_err)  # Full traceback
                                 except Exception as e:
-                                    logger.error(f"Failed to send trip started email: {e}")
+                                    logger.error(f"❌ Failed in email preparation for trip #{new_trip_id}: {e}")
+                                    logger.exception(e)  # Full traceback
                             
-                            st.success("✅ Trip started successfully!")
+                            # Show success message regardless of email status
+                            if email_sent_successfully:
+                                st.success("✅ Trip started successfully! Email notifications sent.")
+                            else:
+                                st.success("✅ Trip started successfully!")
+                                if HAS_EMAIL_AUTOMATION:
+                                    st.warning("⚠️ Trip created but email notification may have failed. Check with fleet admin.")
+                            
                             st.balloons()
                             time.sleep(1)
                             st.rerun()
@@ -1776,6 +1794,7 @@ def render_driver_trip_entry_public_form():
                             execute_non_query(update_vehicle_query, (int(end_mileage), int(trip_id)))
                             
                             # Get vehicle details for email
+                            email_sent_successfully = False
                             if HAS_EMAIL_AUTOMATION:
                                 try:
                                     vehicle_query = """
@@ -1809,12 +1828,28 @@ def render_driver_trip_entry_public_form():
                                         }
                                         
                                         # Send trip completed emails
-                                        email_trip_completed(trip_data)
-                                        logger.info(f"Trip completed email sent for trip #{trip_id}")
+                                        try:
+                                            email_result = email_trip_completed(trip_data)
+                                            if email_result:
+                                                logger.info(f"✅ Trip completed email sent for trip #{trip_id}")
+                                                email_sent_successfully = True
+                                            else:
+                                                logger.warning(f"⚠️ Trip completed email returned False for trip #{trip_id}")
+                                        except Exception as email_err:
+                                            logger.error(f"❌ Email sending exception for trip #{trip_id}: {email_err}")
+                                            logger.exception(email_err)  # Full traceback
                                 except Exception as e:
-                                    logger.error(f"Failed to send trip completed email: {e}")
+                                    logger.error(f"❌ Failed in email preparation for trip #{trip_id}: {e}")
+                                    logger.exception(e)  # Full traceback
                             
-                            st.success(f"✅ Trip completed! You drove {miles_driven} miles. Check your email for trip summary.")
+                            # Show success message regardless of email status
+                            if email_sent_successfully:
+                                st.success(f"✅ Trip completed! You drove {miles_driven} miles. Check your email for trip summary.")
+                            else:
+                                st.success(f"✅ Trip completed! You drove {miles_driven} miles.")
+                                if HAS_EMAIL_AUTOMATION:
+                                    st.warning("⚠️ Trip logged but email notification may have failed.")
+                            
                             st.balloons()
                             time.sleep(1)
                             st.rerun()
