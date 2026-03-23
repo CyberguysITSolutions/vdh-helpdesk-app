@@ -1577,12 +1577,12 @@ def render_driver_trip_entry_public_form():
     
     # Check for active trip
     active_trip_query = """
-        SELECT trip_id, start_location, start_mileage, start_datetime, department
+        SELECT trip_id, start_location, start_mileage, start_datetime, department, notes
         FROM dbo.vehicle_trips
-        WHERE vehicle_id = ? AND driver_email = ? AND trip_status = 'In Progress'
+        WHERE vehicle_id = ? AND trip_status = 'In Progress'
         ORDER BY start_datetime DESC
     """
-    active_trip_df, _ = execute_query(active_trip_query, (int(vehicle_id), driver_email))
+    active_trip_df, _ = execute_query(active_trip_query, (int(vehicle_id),))
     
     has_active_trip = active_trip_df is not None and not active_trip_df.empty
     
@@ -1616,18 +1616,20 @@ def render_driver_trip_entry_public_form():
                     if not start_location or start_mileage == 0:
                         st.error("Please fill in all required fields!")
                     else:
+                        # Note: Store email in notes field since driver_email column doesn't exist
+                        driver_name = driver_email.split('@')[0]
+                        notes_with_email = f"Driver: {driver_name} ({driver_email})\n{trip_notes if trip_notes else ''}"
+                        
                         insert_query = """
                             INSERT INTO dbo.vehicle_trips 
-                            (vehicle_id, driver_email, driver_name, department, 
-                             start_location, start_mileage, start_datetime, trip_status, notes)
-                            VALUES (?, ?, ?, ?, ?, ?, GETDATE(), 'In Progress', ?)
+                            (vehicle_id, department, start_location, start_mileage, 
+                             start_datetime, trip_status, notes)
+                            VALUES (?, ?, ?, ?, GETDATE(), 'In Progress', ?)
                         """
-                        driver_name = driver_email.split('@')[0]  # Extract name from email
                         
                         result, insert_err = execute_non_query(
                             insert_query, 
-                            (int(vehicle_id), driver_email, driver_name, department,
-                             start_location, int(start_mileage), trip_notes)
+                            (int(vehicle_id), department, start_location, int(start_mileage), notes_with_email)
                         )
                         
                         if insert_err or not result:
@@ -1773,11 +1775,14 @@ def render_driver_trip_entry_public_form():
                                     if vehicle_result is not None and not vehicle_result.empty:
                                         vehicle_info = vehicle_result.iloc[0]
                                         
+                                        # Extract driver info from notes or use form email
+                                        driver_name = driver_email.split('@')[0]
+                                        
                                         # Prepare trip data for email
                                         trip_data = {
                                             'trip_id': trip_id,
-                                            'driver_name': start_info['driver_name'],
-                                            'driver_email': start_info['driver_email'],
+                                            'driver_name': driver_name,
+                                            'driver_email': driver_email,
                                             'department': start_info['department'],
                                             'make_model': vehicle_info['make_model'],
                                             'license_plate': vehicle_info['license_plate'],
