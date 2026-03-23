@@ -70,7 +70,7 @@ class EmailConfig:
     # Application Settings
     APP_NAME = "VDH Crater Service Center"
     APP_URL = "https://vdh-helpdesk-app.azurewebsites.net"
-    SUPPORT_PHONE = "804.507.8404"
+    SUPPORT_PHONE = "804-875-1098"
     
     # VDH Branding Colors
     VDH_NAVY = "#002855"
@@ -1595,7 +1595,7 @@ def email_vehicle_request_approved(request_data: Dict[str, Any], approved_by: st
             <li><strong>Check fuel level</strong> and tire condition</li>
             <li><strong>Log trip start</strong> in the VDH Fleet Management system</li>
             <li><strong>Take photos</strong> of any pre-existing damage</li>
-            <li><strong>Emergency contact:</strong> 804.507.8404</li>
+            <li><strong>Emergency contact:</strong> 804-875-1098</li>
         </ol>
     </div>
     
@@ -1687,7 +1687,7 @@ def email_vehicle_request_rejected(request_data: Dict[str, Any], rejected_by: st
     
     <p style="margin-top: 20px;">If you have questions about this decision or need assistance with alternative arrangements, please contact:</p>
     <p>📧 {EmailConfig.SERVICE_EMAIL}<br>
-    📞 804.507.8404</p>
+    📞 804-875-1098</p>
     
     <p>Thank you for your understanding.</p>
     
@@ -1770,7 +1770,7 @@ def email_vehicle_unavailable(request_data: Dict[str, Any], reason: str = "maint
     <p style="margin-top: 20px;">We sincerely apologize for this inconvenience. If you need immediate assistance or have urgent transportation needs, please contact us right away:</p>
     
     <p>📧 {EmailConfig.SERVICE_EMAIL}<br>
-    📞 804.507.8404</p>
+    📞 804-875-1098</p>
     
     <p>Thank you for your patience and understanding.</p>
     
@@ -2113,7 +2113,7 @@ def email_vehicle_service_needed(vehicle_data: Dict[str, Any], urgency: str = "d
         VDH Crater Fleet Services<br>
         301 Halifax St<br>
         Petersburg, VA 23803<br>
-        📞 804.507.8404
+        📞 804-875-1098
     </p>
     
     <p style="margin-top: 20px; font-size: 12px; color: #666;">

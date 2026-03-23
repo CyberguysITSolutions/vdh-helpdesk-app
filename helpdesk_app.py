@@ -1577,10 +1577,11 @@ def render_driver_trip_entry_public_form():
     
     # Check for active trip
     active_trip_query = """
-        SELECT trip_id, start_location, starting_mileage, start_datetime, department, notes
+        SELECT trip_id, start_location, starting_mileage, departure_time, 
+               department, notes, destination, requester_first, requester_last
         FROM dbo.vehicle_trips
-        WHERE vehicle_id = ? AND trip_status = 'In Progress'
-        ORDER BY start_datetime DESC
+        WHERE vehicle_id = ? AND status = 'In Progress'
+        ORDER BY departure_time DESC
     """
     active_trip_df, _ = execute_query(active_trip_query, (int(vehicle_id),))
     
@@ -1616,21 +1617,28 @@ def render_driver_trip_entry_public_form():
                     if not start_location or start_mileage == 0:
                         st.error("Please fill in all required fields!")
                     else:
-                        # Note: Store email in notes field since driver_email column doesn't exist
-                        driver_name = driver_email.split('@')[0]
-                        notes_with_email = f"Driver: {driver_name} ({driver_email})\n{trip_notes if trip_notes else ''}"
+                        # Extract name from email for required fields
+                        email_parts = driver_email.split('@')[0].replace('.', ' ').replace('_', ' ').split()
+                        requester_first = email_parts[0] if len(email_parts) > 0 else "Driver"
+                        requester_last = email_parts[1] if len(email_parts) > 1 else ""
+                        driver_name = f"{requester_first} {requester_last}".strip() if requester_last else requester_first
                         
-                        # Try common mileage column name variations
+                        # Format notes with trip purpose
+                        trip_notes_formatted = f"Trip Purpose: {trip_notes if trip_notes else 'N/A'}"
+                        
                         insert_query = """
                             INSERT INTO dbo.vehicle_trips 
-                            (vehicle_id, department, start_location, starting_mileage, 
-                             start_datetime, trip_status, notes)
-                            VALUES (?, ?, ?, ?, GETDATE(), 'In Progress', ?)
+                            (vehicle_id, requester_first, requester_last, requester_email, 
+                             driver_email, starting_mileage, destination, start_location,
+                             departure_time, status, department, notes)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, GETDATE(), 'In Progress', ?, ?)
                         """
                         
                         result, insert_err = execute_non_query(
                             insert_query, 
-                            (int(vehicle_id), department, start_location, int(start_mileage), notes_with_email)
+                            (int(vehicle_id), requester_first, requester_last, driver_email,
+                             driver_email, int(start_mileage), start_location, start_location,
+                             department, trip_notes_formatted)
                         )
                         
                         if insert_err or not result:
@@ -1687,7 +1695,7 @@ def render_driver_trip_entry_public_form():
             st.success(f"**Active Trip:**")
             st.write(f"🏁 Started from: {start_info['start_location']}")
             st.write(f"📏 Starting mileage: {start_info['starting_mileage']:,} miles")
-            st.write(f"🕐 Started at: {start_info['start_datetime']}")
+            st.write(f"🕐 Started at: {start_info['departure_time']}")
             
             with st.form("end_trip_form"):
                 col1, col2 = st.columns(2)
@@ -1720,18 +1728,23 @@ def render_driver_trip_entry_public_form():
                     elif end_mileage < int(start_info['starting_mileage']):
                         st.error("Ending mileage cannot be less than starting mileage!")
                     else:
-                        # Update trip
+                        # Update trip with correct column names
+                        # Calculate miles driven
+                        miles_driven_calc = end_mileage - int(start_info['starting_mileage'])
+                        
                         update_query = """
                             UPDATE dbo.vehicle_trips
-                            SET end_location = ?, ending_mileage = ?, end_datetime = GETDATE(),
-                                trip_status = 'Completed', 
-                                notes = ISNULL(notes, '') + CHAR(13) + CHAR(10) + ?
+                            SET returning_mileage = ?, 
+                                return_time = GETDATE(),
+                                status = 'Completed',
+                                miles_driven = ?,
+                                notes = ISNULL(notes, '') + CHAR(13) + CHAR(10) + 'Trip completed at: ' + ? + CHAR(13) + CHAR(10) + ?
                             WHERE trip_id = ?
                         """
                         
                         result, update_err = execute_non_query(
                             update_query,
-                            (end_location, int(end_mileage), end_notes or '', int(trip_id))
+                            (int(end_mileage), miles_driven_calc, end_location, end_notes or '', int(trip_id))
                         )
                         
                         if update_err or not result:
@@ -1784,14 +1797,14 @@ def render_driver_trip_entry_public_form():
                                             'trip_id': trip_id,
                                             'driver_name': driver_name,
                                             'driver_email': driver_email,
-                                            'department': start_info['department'],
+                                            'department': start_info['department'] if start_info['department'] else 'N/A',
                                             'make_model': vehicle_info['make_model'],
                                             'license_plate': vehicle_info['license_plate'],
                                             'start_location': start_info['start_location'],
                                             'end_location': end_location,
                                             'start_mileage': int(start_info['starting_mileage']),
                                             'end_mileage': int(end_mileage),
-                                            'start_datetime': str(start_info['start_datetime']),
+                                            'start_datetime': str(start_info['departure_time']),
                                             'end_datetime': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
                                         }
                                         
