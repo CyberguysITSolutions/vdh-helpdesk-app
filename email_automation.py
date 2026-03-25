@@ -1881,8 +1881,8 @@ def email_trip_completed(trip_data: Dict[str, Any]) -> bool:
     miles_driven = trip_data.get('end_mileage', 0) - trip_data.get('start_mileage', 0)
     
     # Calculate trip duration
-    start_time = datetime.strptime(trip_data.get('start_datetime'), '%Y-%m-%d %H:%M:%S') if trip_data.get('start_datetime') else datetime.now()
-    end_time = datetime.strptime(trip_data.get('end_datetime'), '%Y-%m-%d %H:%M:%S') if trip_data.get('end_datetime') else datetime.now()
+    start_time = datetime.strptime(trip_data.get('start_datetime'), '%Y-%m-%d %H:%M:%S.%f') if trip_data.get('start_datetime') else datetime.now()
+    end_time = datetime.strptime(trip_data.get('end_datetime'), '%Y-%m-%d %H:%M:%S.%f') if trip_data.get('end_datetime') else datetime.now()
     duration = end_time - start_time
     hours = duration.total_seconds() / 3600
     
