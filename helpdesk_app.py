@@ -1642,7 +1642,8 @@ def render_driver_trip_entry_public_form():
     
     # Check for active trip - check by driver email first, then by vehicle
     active_trip_query = """
-        SELECT trip_id, vehicle_id, start_location, starting_mileage, departure_time, 
+        SELECT trip_id, vehicle_id, start_location, starting_mileage, 
+               CAST(departure_time AS DATETIME2) as departure_time,
                department, notes, destination, requester_first, requester_last, requester_email, driver_email
         FROM dbo.vehicle_trips
         WHERE status = 'In Progress'
