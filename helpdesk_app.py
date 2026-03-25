@@ -1508,9 +1508,16 @@ def render_driver_trip_entry_public_form():
     st.title("🚙 Driver Trip Entry")
     st.markdown("Log your vehicle trip start and end information for fleet reporting.")
     
+    # DEBUG: Confirm page loaded
+    logger.info("🚀 DEBUG: Driver Trip Entry page loaded")
+    
     # Driver identification
     st.subheader("👤 Driver Information")
     driver_email_input = st.text_input("📧 Your Email or Name", placeholder="e.g., gil.clarke or gil.clarke@vdh.virginia.gov")
+    
+    # DEBUG: Log what user entered
+    if driver_email_input:
+        logger.info(f"📝 DEBUG: User entered: '{driver_email_input}'")
     
     if not driver_email_input:
         st.info("👆 Please enter your email or name to continue")
@@ -1543,11 +1550,13 @@ def render_driver_trip_entry_public_form():
                 # Found exactly one match - use it!
                 driver_email = email_results.iloc[0]['requester_email']
                 st.success(f"✅ Found your email: {driver_email}")
+                logger.info(f"✅ DEBUG: Email lookup successful - using: {driver_email}")
             else:
                 # Multiple matches - let user select
                 st.warning(f"Found {len(email_results)} accounts matching '{driver_email_input}':")
                 email_options = email_results['requester_email'].tolist()
                 driver_email = st.selectbox("Select your email:", email_options)
+                logger.info(f"📋 DEBUG: Multiple emails found - user selected: {driver_email}")
                 st.success(f"✅ Using: {driver_email}")
         else:
             # No matches found - require full email
@@ -1598,10 +1607,19 @@ def render_driver_trip_entry_public_form():
     name_pattern = f"%{name_parts}%"     # %gil clarke%
     first_name_pattern = f"%{first_name}%"  # %gil%
     
+    # DEBUG: Log vehicle query attempt
+    logger.info(f"🚗 DEBUG: Querying vehicles for driver_email={driver_email}")
+    
     vehicles_df, vehicles_err = execute_query(
         vehicles_query, 
         (email_pattern, name_pattern, first_name_pattern, driver_email)
     )
+    
+    # DEBUG: Log vehicles found
+    if vehicles_df is not None and not vehicles_df.empty:
+        logger.info(f"✅ DEBUG: Found {len(vehicles_df)} vehicle(s) for {driver_email}")
+    else:
+        logger.warning(f"⚠️ DEBUG: No vehicles found for {driver_email}")
     
     if vehicles_err or vehicles_df is None or vehicles_df.empty:
         st.warning(f"⚠️ No approved vehicles found for {driver_email}")
@@ -1619,6 +1637,9 @@ def render_driver_trip_entry_public_form():
     selected_vehicle = st.selectbox("Vehicle", vehicle_options, label_visibility="collapsed")
     vehicle_id = vehicles_df.iloc[vehicle_options.index(selected_vehicle)]['id']
     
+    # DEBUG: Log selected vehicle
+    logger.info(f"🚙 DEBUG: Vehicle selected - ID={vehicle_id}, Description='{selected_vehicle}'")
+    
     # Check for active trip - check by driver email first, then by vehicle
     active_trip_query = """
         SELECT trip_id, vehicle_id, start_location, starting_mileage, departure_time, 
@@ -1628,7 +1649,18 @@ def render_driver_trip_entry_public_form():
           AND (driver_email = ? OR requester_email = ? OR vehicle_id = ?)
         ORDER BY departure_time DESC
     """
+    
+    # DEBUG: Log what we're searching for
+    logger.info(f"🔍 DEBUG: Checking for active trips with driver_email={driver_email}, vehicle_id={vehicle_id}")
+    
     active_trip_df, _ = execute_query(active_trip_query, (driver_email, driver_email, int(vehicle_id)))
+    
+    # DEBUG: Log results
+    if active_trip_df is not None and not active_trip_df.empty:
+        logger.info(f"✅ DEBUG: Found {len(active_trip_df)} active trip(s)")
+        logger.info(f"📋 DEBUG: Trip IDs: {active_trip_df['trip_id'].tolist()}")
+    else:
+        logger.warning(f"⚠️ DEBUG: No active trips found for driver_email={driver_email}, vehicle_id={vehicle_id}")
     
     has_active_trip = active_trip_df is not None and not active_trip_df.empty
     
@@ -7762,4 +7794,3 @@ if __name__ == "__main__":
             st.error("An unexpected error occurred while loading the app. The error has been logged. Please contact the administrator.")
         except Exception:
             raise
-# Force redeploy 2026-03-25
