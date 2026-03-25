@@ -1849,22 +1849,20 @@ def render_driver_trip_entry_public_form():
                         st.error("Ending mileage cannot be less than starting mileage!")
                     else:
                         # Update trip with correct column names
-                        # Calculate miles driven
-                        miles_driven_calc = end_mileage - int(start_info['starting_mileage'])
+                        # Note: miles_driven is a computed column, don't update it
                         
                         update_query = """
                             UPDATE dbo.vehicle_trips
                             SET returning_mileage = ?, 
                                 return_time = GETDATE(),
                                 status = 'Completed',
-                                miles_driven = ?,
                                 notes = ISNULL(notes, '') + CHAR(13) + CHAR(10) + 'Trip completed at: ' + ? + CHAR(13) + CHAR(10) + ?
                             WHERE trip_id = ?
                         """
                         
                         result, update_err = execute_non_query(
                             update_query,
-                            (int(end_mileage), miles_driven_calc, end_location, end_notes or '', int(trip_id))
+                            (int(end_mileage), end_location, end_notes or '', int(trip_id))
                         )
                         
                         if update_err or not result:
