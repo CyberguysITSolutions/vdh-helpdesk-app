@@ -1881,8 +1881,24 @@ def email_trip_completed(trip_data: Dict[str, Any]) -> bool:
     miles_driven = trip_data.get('end_mileage', 0) - trip_data.get('start_mileage', 0)
     
     # Calculate trip duration
-    start_time = datetime.strptime(trip_data.get('start_datetime'), '%Y-%m-%d %H:%M:%S.%f') if trip_data.get('start_datetime') else datetime.now()
-    end_time = datetime.strptime(trip_data.get('end_datetime'), '%Y-%m-%d %H:%M:%S.%f') if trip_data.get('end_datetime') else datetime.now()
+    # Handle datetime with or without microseconds
+    def parse_datetime_flexible(dt_string):
+        """Parse datetime string with or without microseconds"""
+        if not dt_string:
+            return datetime.now()
+        # Try with microseconds first
+        try:
+            return datetime.strptime(dt_string, '%Y-%m-%d %H:%M:%S.%f')
+        except ValueError:
+            # If that fails, try without microseconds
+            try:
+                return datetime.strptime(dt_string, '%Y-%m-%d %H:%M:%S')
+            except ValueError:
+                # If both fail, return current time
+                return datetime.now()
+    
+    start_time = parse_datetime_flexible(trip_data.get('start_datetime'))
+    end_time = parse_datetime_flexible(trip_data.get('end_datetime'))
     duration = end_time - start_time
     hours = duration.total_seconds() / 3600
     
