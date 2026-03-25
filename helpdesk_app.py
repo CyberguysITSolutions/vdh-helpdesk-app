@@ -7762,3 +7762,4 @@ if __name__ == "__main__":
             st.error("An unexpected error occurred while loading the app. The error has been logged. Please contact the administrator.")
         except Exception:
             raise
+# Force redeploy 2026-03-25
