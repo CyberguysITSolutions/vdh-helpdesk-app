@@ -1650,10 +1650,15 @@ def render_driver_trip_entry_public_form():
         ORDER BY departure_time DESC
     """
     
-    # DEBUG: Log what we're searching for
+    # DEBUG: Log the query and parameters
     logger.info(f"🔍 DEBUG: Checking for active trips with driver_email={driver_email}, vehicle_id={vehicle_id}")
+    logger.info(f"📝 DEBUG: Query params: ('{driver_email}', '{driver_email}', {int(vehicle_id)})")
     
-    active_trip_df, _ = execute_query(active_trip_query, (driver_email, driver_email, int(vehicle_id)))
+    active_trip_df, active_trip_err = execute_query(active_trip_query, (driver_email, driver_email, int(vehicle_id)))
+    
+    # DEBUG: Log any query errors
+    if active_trip_err:
+        logger.error(f"❌ DEBUG: Active trip query ERROR: {active_trip_err}")
     
     # DEBUG: Log results
     if active_trip_df is not None and not active_trip_df.empty:
@@ -1661,6 +1666,10 @@ def render_driver_trip_entry_public_form():
         logger.info(f"📋 DEBUG: Trip IDs: {active_trip_df['trip_id'].tolist()}")
     else:
         logger.warning(f"⚠️ DEBUG: No active trips found for driver_email={driver_email}, vehicle_id={vehicle_id}")
+        if active_trip_df is None:
+            logger.error(f"❌ DEBUG: active_trip_df is None - query may have failed!")
+        elif active_trip_df.empty:
+            logger.warning(f"⚠️ DEBUG: active_trip_df is empty - query returned no rows")
     
     has_active_trip = active_trip_df is not None and not active_trip_df.empty
     
