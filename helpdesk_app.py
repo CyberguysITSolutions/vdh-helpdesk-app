@@ -57,7 +57,9 @@ try:
         email_trip_completed,
         email_vehicle_service_needed,
         email_vehicle_idle_alert,
-        email_weekly_fleet_summary
+        email_weekly_fleet_summary,
+        email_ticket_status_changed,
+        email_asset_signed_out
     )
     HAS_EMAIL_AUTOMATION = True
 except ImportError as e:
@@ -4861,6 +4863,31 @@ def main():
                                                 success, error = execute_non_query(update_query, (new_status_db, ticket_id))
                                                 
                                                 if success:
+                                                    # Send email notification about status change
+                                                    if HAS_EMAIL_AUTOMATION:
+                                                        try:
+                                                            # Get current user's name for "changed by"
+                                                            changed_by = st.session_state.get('username', 'System')
+                                                            
+                                                            # Prepare ticket data for email
+                                                            email_ticket_data = {
+                                                                'ticket_id': ticket_id,
+                                                                'requester_name': ticket.get('name', 'User'),
+                                                                'requester_email': ticket.get('email', ''),
+                                                                'subject': ticket.get('subject', 'Support Ticket')
+                                                            }
+                                                            
+                                                            # Send email notification
+                                                            email_ticket_status_changed(
+                                                                ticket_data=email_ticket_data,
+                                                                old_status=status_display,
+                                                                new_status=new_status_display,
+                                                                changed_by=changed_by
+                                                            )
+                                                        except Exception as email_error:
+                                                            logger.error(f"Failed to send status change email: {email_error}")
+                                                            # Don't fail the whole operation if email fails
+                                                    
                                                     # Clear ALL related session state keys to prevent white screen
                                                     keys_to_clear = [k for k in st.session_state.keys() if f"_{ticket_id}" in k or "quick_edit" in k]
                                                     for key in keys_to_clear:
@@ -5678,6 +5705,47 @@ def main():
                     )
                     
                     st.info("💡 Click the button above to download and print this form")
+                    
+                    # Email send button
+                    st.markdown("### 📧 Email Form to Recipient")
+                    if st.button("📧 Send PDF to Recipient via Email", type="secondary", use_container_width=True, key="email_signout_form"):
+                        if HAS_EMAIL_AUTOMATION:
+                            # Get asset and recipient data from session state
+                            # We need to fetch the asset data again
+                            asset_query = f"SELECT * FROM dbo.Assets WHERE asset_tag = '{st.session_state.signout_asset_tag}'"
+                            asset_df, asset_err = execute_query(asset_query)
+                            
+                            if not asset_err and asset_df is not None and len(asset_df) > 0:
+                                asset = asset_df.iloc[0].to_dict()
+                                
+                                recipient_data = {
+                                    'name': st.session_state.signout_recipient,
+                                    'email': asset.get('assigned_email'),
+                                    'signout_date': datetime.now().strftime('%Y-%m-%d')
+                                }
+                                
+                                asset_data = {
+                                    'asset_tag': asset.get('asset_tag'),
+                                    'description': f"{asset.get('type')} - {asset.get('model')}",
+                                    'serial_number': asset.get('serial')
+                                }
+                                
+                                # Send email with PDF attachment
+                                email_sent = email_asset_signed_out(
+                                    asset_data=asset_data,
+                                    recipient_data=recipient_data,
+                                    pdf_attachment=st.session_state.signout_pdf
+                                )
+                                
+                                if email_sent:
+                                    st.success(f"✅ Email sent to {recipient_data['email']} with PDF attachment!")
+                                else:
+                                    st.error("❌ Failed to send email. Please check logs.")
+                            else:
+                                st.error("❌ Could not retrieve asset data for email")
+                        else:
+                            st.error("❌ Email automation not available. Contact administrator.")
+                    
                     st.info("📋 Give the printed form to the recipient with the asset")
                 else:
                     st.warning("⚠️ PDF could not be generated. Asset was signed out successfully but no PDF is available.")

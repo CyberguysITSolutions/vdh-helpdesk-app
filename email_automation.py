@@ -691,6 +691,7 @@ def email_ticket_status_changed(ticket_data: Dict[str, Any], old_status: str, ne
         to_addresses=[ticket_data.get('requester_email')],
         subject=f"Ticket #{ticket_data.get('ticket_id')} - Status Updated to {new_status}",
         html_body=html_email,
+        cc_addresses=['service@craterservicecenter.com'],
         bcc_addresses=[EmailConfig.NOTIFICATIONS_EMAIL]
     )
 
