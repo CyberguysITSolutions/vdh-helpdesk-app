@@ -4855,51 +4855,87 @@ def main():
                                     col_a, col_b = st.columns(2)
                                     with col_a:
                                         if st.button("✅", key=f"save_status_{idx}_{ticket_id}", help="Save"):
-                                            # Convert display value to database value
-                                            new_status_db = display_to_db.get(new_status_display, new_status_display)
-                                            # Update database with parameterized query
                                             try:
+                                                logger.info(f"🔄 Starting status update for ticket #{ticket_id}: {status_display} → {new_status_display}")
+                                                
+                                                # Convert display value to database value
+                                                new_status_db = display_to_db.get(new_status_display, new_status_display)
+                                                logger.info(f"📝 Database status value: {new_status_db}")
+                                                
+                                                # Update database with parameterized query
                                                 update_query = "UPDATE dbo.Tickets SET status = ?, updated_at = GETDATE() WHERE ticket_id = ?"
                                                 success, error = execute_non_query(update_query, (new_status_db, ticket_id))
                                                 
                                                 if success:
+                                                    logger.info(f"✅ Database update successful for ticket #{ticket_id}")
+                                                    
                                                     # Send email notification about status change
                                                     if HAS_EMAIL_AUTOMATION:
                                                         try:
                                                             # Get current user's name for "changed by"
                                                             changed_by = st.session_state.get('username', 'System')
                                                             
-                                                            # Prepare ticket data for email
-                                                            email_ticket_data = {
-                                                                'ticket_id': ticket_id,
-                                                                'requester_name': ticket.get('name', 'User'),
-                                                                'requester_email': ticket.get('email', ''),
-                                                                'subject': ticket.get('subject', 'Support Ticket')
-                                                            }
-                                                            
-                                                            # Send email notification
-                                                            email_ticket_status_changed(
-                                                                ticket_data=email_ticket_data,
-                                                                old_status=status_display,
-                                                                new_status=new_status_display,
-                                                                changed_by=changed_by
+                                                            # Try multiple field names for email - database schema varies
+                                                            requester_email = (
+                                                                ticket.get('email') or 
+                                                                ticket.get('requester_email') or 
+                                                                ticket.get('customer_email') or 
+                                                                ''
                                                             )
+                                                            
+                                                            requester_name = (
+                                                                ticket.get('name') or 
+                                                                ticket.get('customer_name') or 
+                                                                ticket.get('requester_name') or 
+                                                                'User'
+                                                            )
+                                                            
+                                                            # Only send email if we have a valid email address
+                                                            if requester_email and '@' in requester_email:
+                                                                # Prepare ticket data for email
+                                                                email_ticket_data = {
+                                                                    'ticket_id': ticket_id,
+                                                                    'requester_name': requester_name,
+                                                                    'requester_email': requester_email,
+                                                                    'subject': ticket.get('subject') or ticket.get('short_description') or 'Support Ticket'
+                                                                }
+                                                                
+                                                                # Send email notification
+                                                                logger.info(f"📧 Sending status change email for ticket #{ticket_id} to {requester_email}")
+                                                                email_sent = email_ticket_status_changed(
+                                                                    ticket_data=email_ticket_data,
+                                                                    old_status=status_display,
+                                                                    new_status=new_status_display,
+                                                                    changed_by=changed_by
+                                                                )
+                                                                if email_sent:
+                                                                    logger.info(f"✅ Status change email sent successfully for ticket #{ticket_id}")
+                                                                else:
+                                                                    logger.warning(f"⚠️ Status change email failed for ticket #{ticket_id}")
+                                                            else:
+                                                                logger.warning(f"⚠️ No valid email address found for ticket #{ticket_id}, skipping email notification")
+                                                        
                                                         except Exception as email_error:
-                                                            logger.error(f"Failed to send status change email: {email_error}")
-                                                            # Don't fail the whole operation if email fails
+                                                            logger.error(f"❌ Failed to send status change email for ticket #{ticket_id}: {email_error}", exc_info=True)
+                                                            # Don't fail the whole operation if email fails - just log it
                                                     
+                                                    logger.info(f"🧹 Clearing session state keys for ticket #{ticket_id}")
                                                     # Clear ALL related session state keys to prevent white screen
                                                     keys_to_clear = [k for k in st.session_state.keys() if f"_{ticket_id}" in k or "quick_edit" in k]
                                                     for key in keys_to_clear:
                                                         del st.session_state[key]
                                                     
+                                                    logger.info(f"🔄 Triggering page rerun after successful status update")
                                                     st.success(f"✅ Ticket #{ticket_id} status updated to {new_status_display}")
                                                     st.rerun()
                                                 else:
+                                                    logger.error(f"❌ Database update failed for ticket #{ticket_id}: {error}")
                                                     st.error(f"Error updating ticket: {error}")
+                                            
                                             except Exception as e:
-                                                st.error(f"Error: {str(e)}")
-                                                logger.exception("Error updating ticket status")
+                                                logger.exception(f"❌ CRITICAL ERROR updating ticket #{ticket_id} status: {str(e)}")
+                                                st.error(f"Error updating ticket status: {str(e)}")
+                                                st.error("Please refresh the page and try again. If the problem persists, contact support.")
                                     with col_b:
                                         if st.button("❌", key=f"cancel_status_{idx}_{ticket_id}", help="Cancel"):
                                             st.session_state[quick_edit_key] = False
