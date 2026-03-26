@@ -4919,13 +4919,12 @@ def main():
                                                             logger.error(f"❌ Failed to send status change email for ticket #{ticket_id}: {email_error}", exc_info=True)
                                                             # Don't fail the whole operation if email fails - just log it
                                                     
-                                                    logger.info(f"🧹 Clearing session state keys for ticket #{ticket_id}")
-                                                    # Clear ALL related session state keys to prevent white screen
-                                                    keys_to_clear = [k for k in st.session_state.keys() if f"_{ticket_id}" in k or "quick_edit" in k]
-                                                    for key in keys_to_clear:
-                                                        del st.session_state[key]
+                                                    logger.info(f"✅ Status update complete for ticket #{ticket_id}")
                                                     
-                                                    logger.info(f"🔄 Triggering page rerun after successful status update")
+                                                    # Exit edit mode by setting the flag to False
+                                                    # Don't delete keys - just toggle the edit mode off
+                                                    st.session_state[quick_edit_key] = False
+                                                    
                                                     st.success(f"✅ Ticket #{ticket_id} status updated to {new_status_display}")
                                                     st.rerun()
                                                 else:
